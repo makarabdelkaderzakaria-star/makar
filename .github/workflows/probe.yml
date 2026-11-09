@@ -1,0 +1,16 @@
+name: probe
+
+on:
+  push:
+    branches:
+      - arena/3b346fad-makar
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: say hello
+        run: |
+          echo "dispatch works"
+          node --version
