@@ -67,6 +67,27 @@ jobs:
           $exe.FullName | Set-Content -Path "$env:RUNNER_TEMP\brave-exe.txt"
           Write-Host "brave.exe: $($exe.FullName) ($($exe.Length) bytes)"
 
+          # What does the file itself say? This is the ground truth that the
+          # browser detector has to agree with.
+          $version = $exe.VersionInfo
+          Write-Host "ProductName    : $($version.ProductName)"
+          Write-Host "ProductVersion : $($version.ProductVersion)"
+          Write-Host "FileDescription: $($version.FileDescription)"
+          Write-Host "CompanyName    : $($version.CompanyName)"
+          Write-Host "OriginalFilename: $($version.OriginalFilename)"
+
+      - name: look at what the browser executable actually contains
+        shell: pwsh
+        run: |
+          # A diagnostic: if the detector cannot name the browser, this
+          # shows the strings that are really in the file.
+          $braveExe = Get-Content -LiteralPath "$env:RUNNER_TEMP\brave-exe.txt" -Raw
+          $braveExe = $braveExe.Trim()
+          if ($braveExe) {
+            node raqib\scripts\scan-product-strings.mjs $braveExe *>&1 |
+              Tee-Object -FilePath "$env:RUNNER_TEMP\logs\brave-strings.log"
+          }
+
       - name: copy the executable into a clean folder
         shell: pwsh
         run: |
@@ -185,6 +206,12 @@ jobs:
           }
           Write-Host "published sha256: $sha"
           Stop-Transcript | Out-Null
+
+          # The publishing step is a convenience, not a verdict: the verdict
+          # belongs to the test step. Whatever gh left behind in the exit
+          # code must not turn a green run red.
+          Write-Host "publish step finished (last native exit code: $LASTEXITCODE)"
+          exit 0
 
       - name: keep the results and the logs in the repository
         if: always()

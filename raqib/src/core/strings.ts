@@ -46,7 +46,15 @@ export function extractStrings(buffer: Buffer, options: StringOptions = {}): Ext
   }
 
   // UTF-16LE: printable byte followed by a zero byte.
+  //
+  // The scan has to stay on even offsets: a UTF-16 character is two bytes,
+  // so starting one byte off would read every pair the wrong way round and
+  // find nothing at all.
   for (let i = 0; i + 1 < buffer.length; i += 2) {
+    const first = buffer[i];
+    const firstHigh = buffer[i + 1];
+    if (!(first >= 0x20 && first <= 0x7e && firstHigh === 0)) continue;
+
     let j = i;
     const chars: number[] = [];
     while (j + 1 < buffer.length) {
@@ -62,8 +70,9 @@ export function extractStrings(buffer: Buffer, options: StringOptions = {}): Ext
       if (!options.filter || options.filter.test(value)) {
         out.push({ value, offset: i, encoding: 'utf16le' });
       }
-      i = j - 1;
     }
+    // Resume at the end of the string, still on an even offset.
+    i = j - 2;
     if (out.length >= maxStrings) break;
   }
 

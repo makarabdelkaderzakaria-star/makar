@@ -15,7 +15,7 @@ import { homedir } from 'node:os';
 import { basename, join, win32 } from 'node:path';
 import { makeEvidence, type Evidence, type Fact, type SourceLocation } from './evidence.js';
 import { walk, formatBytes, DEFAULT_IGNORE_DIRS } from './util.js';
-import { extractStrings } from './strings.js';
+import { extractStrings, type ExtractedString } from './strings.js';
 
 export interface SubsystemHit {
   subsystem: string;
@@ -234,6 +234,15 @@ export interface BrowserIdentity {
   limitations: string[];
 }
 
+/**
+ * How a browser names itself.
+ *
+ * Two shapes are looked for. Some binaries carry the combined form the user
+ * agent uses — "Brave/1.62.126". Most do not: the version resource of a
+ * Windows executable keeps the product name and the product version in
+ * *separate* strings, so "Brave" and "1.101.38" have to be read on their
+ * own and put back together.
+ */
 const PRODUCT_MARKERS: Array<{ pattern: RegExp; product: string; engine: string }> = [
   { pattern: /Brave\/(\d+\.\d+\.\d+)/, product: 'Brave', engine: 'Chromium' },
   { pattern: /Vivaldi\/(\d+\.\d+\.\d+)/, product: 'Vivaldi', engine: 'Chromium' },
@@ -242,6 +251,45 @@ const PRODUCT_MARKERS: Array<{ pattern: RegExp; product: string; engine: string 
   { pattern: /Chrome\/(\d+\.\d+\.\d+)/, product: 'Google Chrome', engine: 'Chromium' },
   { pattern: /Chromium\/(\d+\.\d+\.\d+)/, product: 'Chromium', engine: 'Chromium' },
 ];
+
+/** The product name on its own, as the version resource spells it. */
+const PRODUCT_NAMES: Array<{ pattern: RegExp; product: string; engine: string }> = [
+  { pattern: /^Brave( Browser)?$/, product: 'Brave', engine: 'Chromium' },
+  { pattern: /^Google Chrome$/, product: 'Google Chrome', engine: 'Chromium' },
+  { pattern: /^Microsoft Edge$/, product: 'Microsoft Edge', engine: 'Chromium' },
+  { pattern: /^Vivaldi$/, product: 'Vivaldi', engine: 'Chromium' },
+  { pattern: /^Chromium$/, product: 'Chromium', engine: 'Chromium' },
+  { pattern: /^Opera( GX)?$/, product: 'Opera', engine: 'Chromium' },
+];
+
+/**
+ * The strings worth keeping when a browser binary is read.
+ *
+ * Everything else is thrown away as it is found, which is what lets the
+ * scan reach the end of a hundred-megabyte executable: the version
+ * resource sits at the very end, long after the sixty thousandth string.
+ */
+const BROWSER_STRING_FILTER = new RegExp([
+  '^Brave( Browser)?$',
+  '^Google Chrome$',
+  '^Microsoft Edge$',
+  '^Vivaldi$',
+  '^Chromium$',
+  '^Opera( GX)?$',
+  '^(Brave|Chrome|Chromium|Edge|Vivaldi|OPR)\/\d+\.\d+(\.\d+)?',
+  'fingerprinting',
+  'tracker.?block',
+  'ad.?block',
+  'debounc',
+  '\\btor\\b',
+  'brave.?vpn',
+  'brave.?rewards',
+  '\\bleo\\b',
+  'brave.?wallet',
+  'brave.?sync',
+  'privacy.?budget',
+  '^\\d+\\.\\d+\\.\\d+(\\.\\d+)?$',
+].join('|'), 'i');
 
 const FEATURE_MARKERS: Array<[string, RegExp]> = [
   ['shields', /brave[_\s-]?shields/i],
@@ -257,6 +305,24 @@ const FEATURE_MARKERS: Array<[string, RegExp]> = [
   ['sync', /brave.?sync/i],
   ['privacy-budget', /privacy.?budget/i],
 ];
+
+/**
+ * The version-shaped string closest to a given offset.
+ *
+ * In a version resource the product name and the product version sit next
+ * to one another, so the nearest version-shaped string is the one that
+ * belongs with it.
+ */
+function nearestVersion(strings: ExtractedString[], offset: number): string | null {
+  const VERSION = /^\d+\.\d+\.\d+(\.\d+)?$/;
+  let best: { value: string; distance: number } | null = null;
+  for (const candidate of strings) {
+    if (!VERSION.test(candidate.value)) continue;
+    const distance = Math.abs(candidate.offset - offset);
+    if (!best || distance < best.distance) best = { value: candidate.value, distance };
+  }
+  return best ? best.value : null;
+}
 
 /**
  * Identify an installed Chromium-family browser from its own files.
@@ -284,7 +350,17 @@ export async function identifyBrowser(directory: string): Promise<BrowserIdentit
   for (const candidate of candidates) {
     const buffer = await readFile(candidate.path).catch(() => null);
     if (!buffer) continue;
-    const strings = extractStrings(buffer, { minLength: 8, maxStrings: 60000 });
+
+    // Only the strings that could possibly matter are kept, so the scan
+    // reaches the end of the file instead of stopping at the sixtieth
+    // thousandth string.
+    const strings = extractStrings(buffer, {
+      // Short, because a product name can be short: "Brave" is five
+      // characters and the filter is what does the real work.
+      minLength: 4,
+      maxStrings: 200000,
+      filter: BROWSER_STRING_FILTER,
+    });
     const haystack = strings.map((s) => s.value).join('\n');
 
     let matched = false;
@@ -298,10 +374,27 @@ export async function identifyBrowser(directory: string): Promise<BrowserIdentit
         executable = candidate.path;
         version = found[1];
       }
-      if (marker.product === 'Brave' || marker.product === 'Google Chrome' || marker.product === 'Chromium') {
-        const chrome = /Chrome\/(\d+\.\d+\.\d+)/.exec(haystack);
-        if (chrome && !chromiumVersion) chromiumVersion = chrome[1];
+    }
+
+    // The version resource of a Windows executable keeps the product name
+    // and the product version apart, next to one another. When the combined
+    // form was not there, they are put back together by proximity.
+    if (!product) {
+      for (const marker of PRODUCT_NAMES) {
+        const found = strings.find((s) => marker.pattern.test(s.value));
+        if (!found) continue;
+        matched = true;
+        product = marker.product;
+        engine = marker.engine;
+        executable = candidate.path;
+        version = nearestVersion(strings, found.offset);
+        break;
       }
+    }
+
+    if (product) {
+      const chrome = /Chrome\/(\d+\.\d+\.\d+)/.exec(haystack);
+      if (chrome) chromiumVersion = chrome[1];
     }
 
     for (const [name, pattern] of FEATURE_MARKERS) {

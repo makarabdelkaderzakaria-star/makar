@@ -126,3 +126,71 @@ test('the browser install list covers Windows, and says where', () => {
   const perUser = paths.filter((p) => p.label.includes(', user'));
   assert.equal(perUser.length, process.env.LOCALAPPDATA ? 5 : 0);
 });
+
+test('reads a browser whose version resource keeps the name and the version apart', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'raqib-browser-'));
+  try {
+    // A Windows executable keeps ProductName and ProductVersion in separate
+    // UTF-16 strings, and keeps them at the very end of the file. The
+    // detector has to reach the end and put the two back together.
+    const head = Buffer.from('x'.repeat(1024), 'utf8');
+    const filler: Buffer[] = [head];
+    for (let i = 0; i < 400; i += 1) {
+      filler.push(Buffer.from(`some ordinary resource string number ${i} padding padding`, 'utf8'));
+      filler.push(Buffer.from([0, 0, 0, 0]));
+    }
+    // Each string in a version resource is null-terminated.
+    const utf16 = (text: string) => Buffer.from(`${text}\0`, 'utf16le');
+    const resource = Buffer.concat([
+      utf16('CompanyName'),
+      utf16('The Brave Company'),
+      utf16('FileDescription'),
+      utf16('Brave Browser'),
+      utf16('ProductName'),
+      utf16('Brave'),
+      utf16('ProductVersion'),
+      utf16('1.101.38'),
+      utf16('OriginalFilename'),
+      utf16('brave.exe'),
+    ]);
+    // The detector only looks at files that look like an executable, so
+    // the fixture has to be big enough to be taken seriously.
+    filler.push(Buffer.alloc(1_200_000, 0x20));
+    const exe = join(dir, 'brave.exe');
+    await writeFile(exe, Buffer.concat([...filler, resource]));
+
+    const identity = await identifyBrowser(dir);
+    assert.equal(identity.product, 'Brave');
+    assert.equal(identity.engine, 'Chromium');
+    assert.equal(identity.version, '1.101.38');
+    assert.ok(identity.executable?.endsWith('brave.exe'));
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('the version resource is read even when the file is mostly noise', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'raqib-browser-'));
+  try {
+    // Sixty thousand strings before the version resource: enough to stop a
+    // scan that gives up early.
+    const parts: Buffer[] = [];
+    for (let i = 0; i < 61000; i += 1) {
+      parts.push(Buffer.from(`noise string ${i} with some padding to make it longer`, 'utf8'));
+      parts.push(Buffer.from([0]));
+    }
+    const utf16 = (text: string) => Buffer.from(`${text}\0`, 'utf16le');
+    parts.push(utf16('ProductName'));
+    parts.push(utf16('Vivaldi'));
+    parts.push(utf16('ProductVersion'));
+    parts.push(utf16('7.5.3735.47'));
+    const exe = join(dir, 'vivaldi.exe');
+    await writeFile(exe, Buffer.concat(parts));
+
+    const identity = await identifyBrowser(dir);
+    assert.equal(identity.product, 'Vivaldi');
+    assert.equal(identity.version, '7.5.3735.47');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
