@@ -20,6 +20,8 @@ Three verbs and one expression syntax. Everything after `#` is a comment.
 | `queue-size` | `1mb` | WinDivert queue memory (driver default 4 MB) |
 | `retain-budget` | `2mb` | bytes we may hold while waiting for a rate |
 | `max-retain` | `250ms` | hard ceiling on how long a packet may be held |
+| `codel` | `0` (off) | CoDel target standing-queue delay, e.g. `5ms` |
+| `codel-interval` | `100ms` | how long the queue must stay above the target first |
 | `flow-idle` | `120s` | idle time before a flow row is swept |
 | `identity-ttl` | `30s` | how long a PID → name mapping is trusted |
 | `batch-max` | `64` | packets asked for per receive (clamped to 255) |
@@ -29,6 +31,32 @@ Three verbs and one expression syntax. Everything after `#` is a comment.
 
 Durations accept `ms`, `s`, or a bare number of milliseconds. Sizes accept
 `kb`, `mb`, `gb` or a bare number of bytes.
+
+### CoDel: bound the delay you add, not just the bytes you hold
+
+A byte budget with a 250 ms ceiling can still hold a queue that is always
+200 ms deep: nothing is dropped, every packet arrives, and every conversation
+feels slow. That is bufferbloat, and it is invisible to a drop counter. CoDel
+(RFC 8289) watches the sojourn time of the packets *we* hold, and when the
+minimum has stayed above a target for a whole interval — a standing queue, not
+a burst — it drops the packets that would arrive late instead of delivering
+them late. Drops then get closer together while the queue stays deep
+(`interval / sqrt(count)`).
+
+```text
+param codel = 5ms            # off unless you ask; 5 ms is the usual target
+param codel-interval = 100ms # how long it must persist before acting
+```
+
+* CoDel is **off by default** and costs one comparison when it is off, so every
+  configuration written before it existed behaves exactly as it did.
+* It does not replace the rate limits and it does not detect congestion on the
+  link you do not own: it bounds the delay **this program** adds by buffering.
+* Drops are counted separately (`retained_codel` in the snapshot, and part of
+  `retained_shed` so the accounting identity keeps holding) — a silent drop is
+  a bug, not an optimisation.
+* A packet that has already waited more than `max-retain` is shed before CoDel
+  ever sees it; CoDel acts on the packets that are still within the ceiling.
 
 **Why the defaults are lower than the driver's**: a shaper that queues 2 s of
 packets is a shaper that causes retransmissions, and a retransmission spends the
@@ -172,6 +200,7 @@ rule limit=browser.exe : proc browser.exe
 param queue-time   = 400ms
 param max-retain   = 250ms
 param retain-budget = 2mb
+param codel        = 5ms
 
 limit chrome.exe = 8mbit  burst 64kb
 limit steam.exe  = 20mbit burst 256kb

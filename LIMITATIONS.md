@@ -47,6 +47,7 @@ What that does and does not buy you:
 | `WinDivertHelperParsePacket` agreement with our own parser | **untested** — needs hardware |
 | `dist/netrocket-0.2.0-windows-x64.zip` contains a working shaper | **not claimed** — the binary has never been started |
 | A daily/monthly cap stops traffic at the right byte | **unit-tested** in the engine; the accounting has never been compared with a carrier's meter, and it resets on UTC boundaries, not local midnight |
+| CoDel sheds a standing queue instead of delivering it late | **unit-tested** (`codel::tests`, `scheduler::tests`); the target and interval are judgement calls, and nothing has been measured on a real link |
 | A scheduled limit is absent outside its window | **unit-tested** in the engine (including a window that wraps midnight, and a cap that is not charged outside one); the clock is UTC, so a user west of Greenwich sees the window move |
 | The cap counter survives a restart | **unit-tested** (`caps::tests`), including a stale file; a crash loses at most one minute of accounting, and two daemons sharing one config would overwrite each other's file |
 

@@ -28,6 +28,9 @@ use crate::identity::{IdentityCache, Lookup, ProcKey, Resolver};
 use crate::packet::{Direction, PacketView, Protocol};
 use crate::rules::{Action, CompiledRules, RuleSet};
 use crate::scheduler::{Admit, Scheduler, Shed};
+
+/// Nanoseconds in a millisecond; config durations are in ms.
+const NS_PER_MS: u64 = 1_000_000;
 use crate::stats::{Counters, Snapshot};
 
 /// What the engine wants done with one packet.
@@ -144,7 +147,11 @@ impl<const FLOWS: usize> Engine<FLOWS> {
     /// Build an engine from a validated configuration.
     #[must_use]
     pub fn new(config: Config) -> Self {
-        let scheduler = Scheduler::new(config.retain_budget_bytes, config.max_retain_ms);
+        let mut scheduler = Scheduler::new(config.retain_budget_bytes, config.max_retain_ms);
+        scheduler.set_codel(
+            config.codel_target_ms.saturating_mul(NS_PER_MS),
+            config.codel_interval_ms.saturating_mul(NS_PER_MS),
+        );
         let identities = IdentityCache::new(1024, 64 * 1024, config.identity_ttl_ms);
         let mut engine = Self {
             config,
@@ -1446,5 +1453,18 @@ mod tests {
         assert_eq!(decision_of(&mut e, &f, 4), Decision::SendNow);
         assert_eq!(decision_of(&mut e, &f, 5), Decision::SendNow);
         assert_eq!(decision_of(&mut e, &f, 6), Decision::Drop(DropReason::Cap));
+    }
+
+    // -----------------------------------------------------------------------
+    // CoDel
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn the_engine_arms_codel_only_when_the_config_asks() {
+        let (off, _) = Config::parse("param max-retain = 250ms\n").unwrap();
+        assert!(!Engine::<1024>::new(off).scheduler_mut().codel_enabled());
+
+        let (on, _) = Config::parse("param codel = 5ms\n").unwrap();
+        assert!(Engine::<1024>::new(on).scheduler_mut().codel_enabled());
     }
 }

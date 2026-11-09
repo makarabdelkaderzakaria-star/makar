@@ -129,6 +129,9 @@ pub struct Snapshot {
     pub retained_shed: u64,
     /// Packets still sitting in the retention buffer right now.
     pub retained_left: u64,
+    /// Of `retained_shed`, how many CoDel dropped on purpose because the queue
+    /// was standing above its target (0 when CoDel is off).
+    pub retained_codel: u64,
 }
 
 impl Snapshot {
@@ -221,11 +224,15 @@ impl Counters {
             retained_peak: scheduler.max_held_bytes(),
             max_wait_ns: scheduler.max_wait_ns(),
             retain_budget: scheduler.budget(),
+            // CoDel drops come out of the same buffer, so they belong in the
+            // same total: the accounting identity in the field docs must keep
+            // holding with CoDel armed or off.
             retained_shed: {
                 let (a, b, c) = scheduler.shed();
-                a + b + c
+                a + b + c + scheduler.codel_drops()
             },
             retained_left: scheduler.len() as u64,
+            retained_codel: scheduler.codel_drops(),
         }
     }
 }

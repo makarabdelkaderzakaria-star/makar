@@ -97,8 +97,9 @@ Still open:
       reason `cap`. Tests: budget exhaustion, daily rollover, a monthly cap
       surviving the next day, restoring a counter only within its own period,
       and an uncapped limit never counting a cap drop.
-* [ ] CoDel-style queue management for the "no limit configured but the link is
-      congested" case — complementary to GCRA, not a replacement.
+* [x] CoDel queue management: bounds the delay our own buffering adds, which is
+      the part of "the link is congested" this program is responsible for.
+      `param codel = 5ms`, off by default.
 * [ ] ECN marking instead of dropping, where the peer supports it.
 
 ## 1.0 — interface

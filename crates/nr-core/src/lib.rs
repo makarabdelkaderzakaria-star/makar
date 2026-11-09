@@ -40,6 +40,7 @@
 
 pub mod attribution;
 pub mod calendar;
+pub mod codel;
 pub mod config;
 pub mod error;
 pub mod flow;
@@ -54,6 +55,7 @@ pub mod stats;
 
 pub use attribution::{FlowAttribution, FlowEvent, SeedReport, SnapshotEntry};
 pub use calendar::Calendar;
+pub use codel::Codel;
 pub use config::{Cap, CapPeriod, Config, LimitScope, Limits, OverLimitPolicy, Window};
 pub use error::{ConfigError, ParseError, RuleError};
 pub use flow::{Endpoint, FlowKey, FlowTable};

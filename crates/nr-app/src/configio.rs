@@ -89,6 +89,13 @@ param queue-size = 1mb
 # TCP retransmission timeout, so nothing we hold is ever retransmitted.
 param retain-budget = 2mb
 param max-retain = 250ms
+#
+# CoDel: keep the *standing* queue short, not just the average. When the
+# packets we hold have waited more than the target for a whole interval, drop
+# the ones that would be late instead of delivering them late. Off by default
+# (0); 5ms is the usual target and 100ms the usual interval.
+# param codel = 5ms
+# param codel-interval = 100ms
 
 # --- housekeeping ---------------------------------------------------------
 param flow-idle = 120s

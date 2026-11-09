@@ -138,6 +138,14 @@ daemon and the simulator cannot disagree about what time it is).
   identity `packets == forwarded + dropped + shed + still_held` is asserted in
   tests, not just documented.
 
+### CoDel on the way out
+
+The drain step consults `Codel` per packet, using the sojourn time the packet
+has *already* waited (see `codel.rs`). It is checked at emission rather than
+admission because the question is not "is this packet slow" but "is the queue
+still standing" — and only the queue's own history can answer that. A packet
+CoDel refuses is removed from the buffer and counted, never silently lost.
+
 No timer thread with a fixed heartbeat: `next_due_ns()` returns the exact
 instant to wake, so an idle daemon is genuinely idle. The original armed a 1 ms
 timer that scanned every queue a thousand times a second.

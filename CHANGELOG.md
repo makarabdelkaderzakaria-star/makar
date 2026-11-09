@@ -4,6 +4,19 @@
 
 ### Added
 
+* **CoDel queue management (`param codel = 5ms`).** A byte budget bounds how
+  much is held but not how long it stands: a queue that is always 200 ms deep
+  drops nothing and makes everything feel slow. `Codel` (RFC 8289) now watches
+  the sojourn time of the packets we retain and, once the minimum has been above
+  the target for a whole interval, drops the packets that would arrive late
+  instead of delivering them late, tightening the spacing as
+  `interval / sqrt(count)` while the queue persists. Off by default (one
+  comparison on the drain path), 100 ms interval by default, and every drop is
+  counted in `retained_codel` and included in `retained_shed`, so the accounting
+  identity keeps holding. Tests: a burst below target is never punished, a
+  standing queue starts dropping after one interval, drops escalate, a draining
+  queue resets the episode, the scheduler sheds only when armed, and the
+  integer square root the spacing depends on.
 * **Time-of-day schedules.** `limit steam.exe = 4mbit schedule 08:00-18:00`
   (or `schedule 22:00-06:00`, which wraps midnight) enforces the limit only
   inside that **UTC** window; outside it the limit does not exist -- packets go
