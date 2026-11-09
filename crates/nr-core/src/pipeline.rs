@@ -557,21 +557,28 @@ impl<const FLOWS: usize> Engine<FLOWS> {
                     lane.commit(len, now_ns);
                 }
             }
-            LimitScope::Flow => match (self.gcra.get(li).copied(), self.flows.get_mut(&flow)) {
-                (Some(template), Some(entry)) => {
-                    let mut lane = template;
-                    lane.set_tat(entry.state);
-                    lane.commit(len, now_ns);
-                    entry.state = lane.tat();
-                }
-                // The row was swept while the packet was retained (only
-                // possible if the retention ceiling outlived the flow idle
-                // timeout, which the defaults do not do). There is no per-flow
-                // state left to charge; charge nothing rather than inventing it.
-                _ => {}
-            },
+            LimitScope::Flow => self.commit_to_flow(&flow, li, len, now_ns),
         }
         self.stats.emitted_from_retention += 1;
+    }
+
+    /// Charge a per-flow lane at emission time.
+    ///
+    /// A missing row means the flow was swept while the packet was retained
+    /// (only possible if the retention ceiling outlived the flow idle timeout,
+    /// which the defaults do not do). There is no per-flow state left to
+    /// charge, so nothing is charged rather than something being invented.
+    fn commit_to_flow(&mut self, flow: &FlowKey, li: usize, len: u32, now_ns: u64) {
+        let Some(template) = self.gcra.get(li).copied() else {
+            return;
+        };
+        let Some(entry) = self.flows.get_mut(flow) else {
+            return;
+        };
+        let mut lane = template;
+        lane.set_tat(entry.state);
+        lane.commit(len, now_ns);
+        entry.state = lane.tat();
     }
 
     /// Charge the *flow's own* lane and report `(conforms, wait_ns)`.

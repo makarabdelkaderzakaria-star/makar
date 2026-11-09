@@ -31,37 +31,6 @@ jobs:
       - name: check (windows target)
         run: bash scripts/ci-annotate.sh "check/windows" cargo check --target x86_64-pc-windows-msvc --all-targets
 
-  # Temporary convenience job: apply rustfmt and push the result, so a layout
-  # disagreement never needs a manual round trip. It only pushes when
-  # formatting actually changed, so it cannot loop. Removed once clean.
-  format:
-    if: github.event_name == 'push'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    defaults:
-      run:
-        shell: bash
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.ref_name }}
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt
-      - name: cargo fmt
-        run: cargo fmt --all
-      - name: commit and push if changed
-        run: |
-          if git diff --quiet; then
-            echo "already formatted"
-            exit 0
-          fi
-          git config user.name "netrocket-fmt"
-          git config user.email "noreply@localhost"
-          git commit -qam "style: cargo fmt"
-          git push
-
   test:
     strategy:
       fail-fast: false
