@@ -65,9 +65,14 @@ pub fn simulate(loaded: &crate::configio::Loaded, args: &SimArgs) -> Result<SimO
     // show what the real engine will do, so it must not approximate them.
     let mut engine = Engine::<8192>::new(config);
     engine.set_rules(loaded.rules.clone());
-    // Caps reset on UTC boundaries; the simulator uses the real clock so a
-    // simulated day is the same day the daemon would be in.
-    engine.set_calendar(crate::caps::utc_now());
+    // Caps reset on UTC boundaries and schedules follow the wall clock, so the
+    // simulator uses the real clock by default; `--at` pins the time of day so a
+    // run that involves a schedule is reproducible.
+    let mut calendar = crate::caps::utc_now();
+    if let Some(minute) = args.at {
+        calendar = calendar.at_minute(minute);
+    }
+    engine.set_calendar(calendar);
 
     // Seed attribution the way the Windows runner does at start-up: from an
     // endpoint table that predates the engine. In the simulator we synthesise

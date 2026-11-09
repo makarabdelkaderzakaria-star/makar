@@ -89,7 +89,9 @@ rule limit=browser.exe : proc browser.exe
 `per-flow` gives each connection its own bucket; without it a limit is one
 bucket shared by every flow the process opens. `cap` is a byte budget that
 resets at 00:00 UTC daily or monthly — the metered-connection case — and its
-counter survives a restart.
+counter survives a restart. `schedule 08:00-18:00` makes a limit exist only
+during that UTC window (it may wrap midnight), which is what "do not saturate
+the line while I am working" actually needs.
 
 Full reference: [`docs/CONFIG.md`](docs/CONFIG.md).
 

@@ -112,6 +112,16 @@ it spent forever. The counters are persisted by `nr-app` in `<config>.caps`,
 stamped with the period they belong to; a stamp from another period is ignored
 on load, so yesterday's spend can never be charged to today.
 
+## Schedules: a limit that is not there
+
+A `schedule` window is checked first, in `outside_window`, before anything else
+costs work: outside it the limit is *absent*, not zero-rate. Packets are
+forwarded with no shaping, no retention and no cap charge — a cap on a
+scheduled limit is a budget for the hours the limit runs. The check is one
+`Option` read plus two comparisons on the minute of the day, which the calendar
+already carries (guarded by the same `Calendar` that rolls caps over, so the
+daemon and the simulator cannot disagree about what time it is).
+
 ## Retention: bounded, short, and honest
 
 `Scheduler` (`scheduler.rs`) holds packets that a shaper cannot send yet.

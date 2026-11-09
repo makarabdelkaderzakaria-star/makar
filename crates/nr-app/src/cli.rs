@@ -66,6 +66,8 @@ pub struct SimArgs {
     pub frames: usize,
     /// Print the per-flow table.
     pub verbose: bool,
+    /// Pin the clock to this minute of the day (UTC), for `schedule` limits.
+    pub at: Option<u16>,
 }
 
 impl Default for SimArgs {
@@ -75,6 +77,7 @@ impl Default for SimArgs {
             flows: 8,
             frames: 1_000,
             verbose: false,
+            at: None,
         }
     }
 }
@@ -147,6 +150,12 @@ pub fn parse<I: IntoIterator<Item = String>>(args: I) -> Result<Command, String>
                     }
                     _ if flag.starts_with("--config=") => {
                         a.config = PathBuf::from(&flag["--config=".len()..]);
+                    }
+                    _ if flag.starts_with("--at=") => {
+                        let v = &flag["--at=".len()..];
+                        a.at = nr_core::config::parse_minute_of_day(v)
+                            .ok_or_else(|| format!("bad time for `simulate --at`: {v}"))?
+                            .into();
                     }
                     other => return Err(format!("unknown option for `simulate`: {other}")),
                 }
@@ -239,7 +248,7 @@ netrocket — per-application bandwidth shaping for Windows, in Rust
 
 USAGE
   netrocket run      [--config=FILE] [--monitor] [--filter=EXPR]
-  netrocket simulate [--config=FILE] [--flows=N] [--frames=N] [--verbose]
+  netrocket simulate [--config=FILE] [--flows=N] [--frames=N] [--at=HH:MM] [--verbose]
   netrocket bench    [--flows=N] [--frames=N] [--repeat=N] [--stream]
   netrocket init     [--config=FILE] [--force]
   netrocket check    [--config=FILE]

@@ -13,13 +13,15 @@
 //! The month computation is Howard Hinnant's `civil_from_days`, which is exact
 //! for every date in the proleptic Gregorian calendar and uses no lookup tables.
 
-/// Days since the Unix epoch, plus the month that day belongs to.
+/// Wall-clock position in UTC: the day, the month, and the minute of the day.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
 pub struct Calendar {
     /// Days since 1970-01-01 (UTC).
     pub day: u32,
     /// Months since 1970-01: `(year - 1970) * 12 + (month - 1)`.
     pub month: u32,
+    /// Minutes since 00:00 UTC, `0..1440`.
+    pub minute: u16,
 }
 
 /// Seconds in a day.
@@ -32,7 +34,13 @@ impl Calendar {
     /// on a machine whose clock is that wrong has larger problems.
     #[must_use]
     pub const fn from_unix_secs(secs: u64) -> Self {
-        Self::from_day_index((secs / SECS_PER_DAY) as u32)
+        let day = (secs / SECS_PER_DAY) as u32;
+        let minute = ((secs % SECS_PER_DAY) / 60) as u16;
+        Self {
+            day,
+            month: month_index(day),
+            minute,
+        }
     }
 
     /// Calendar position of a day index.
@@ -41,7 +49,29 @@ impl Calendar {
         Self {
             day,
             month: month_index(day),
+            minute: 0,
         }
+    }
+
+    /// Same day and month, at `minute` past midnight.
+    ///
+    /// Used by `simulate --at` to pin the clock to a time of day, so a run that
+    /// involves schedules is reproducible instead of depending on when it was
+    /// started.
+    #[must_use]
+    pub const fn at_minute(mut self, minute: u16) -> Self {
+        self.minute = if minute < crate::config::MINUTES_PER_DAY {
+            minute
+        } else {
+            minute % crate::config::MINUTES_PER_DAY
+        };
+        self
+    }
+
+    /// Is the clock inside `window`?
+    #[must_use]
+    pub const fn in_window(self, window: crate::config::Window) -> bool {
+        window.contains(self.minute)
     }
 
     /// Which period stamp applies to `period`.
@@ -129,6 +159,29 @@ mod tests {
         let noon = 20_766 * SECS_PER_DAY + 12 * 3600;
         assert_eq!(Calendar::from_unix_secs(noon).day, 20_766);
         assert_eq!(Calendar::from_unix_secs(noon).month, 682);
+    }
+
+    #[test]
+    fn decodes_the_minute_of_the_day() {
+        assert_eq!(Calendar::from_unix_secs(0).minute, 0);
+        assert_eq!(Calendar::from_unix_secs(59).minute, 0);
+        assert_eq!(Calendar::from_unix_secs(60).minute, 1);
+        let noon = 20_766 * SECS_PER_DAY + 12 * 3600 + 45 * 60;
+        let cal = Calendar::from_unix_secs(noon);
+        assert_eq!(cal.minute, 12 * 60 + 45);
+        assert_eq!(cal.day, 20_766);
+        // Pinning the time of day keeps the date, and wraps past midnight.
+        assert_eq!(cal.at_minute(0).minute, 0);
+        assert_eq!(cal.at_minute(crate::config::MINUTES_PER_DAY).minute, 0);
+    }
+
+    #[test]
+    fn windows_are_evaluated_against_the_minute_of_the_day() {
+        let window = crate::config::Window::parse("08:00-18:00").unwrap();
+        let nine = Calendar::from_day_index(20_766).at_minute(9 * 60);
+        let eight_pm = Calendar::from_day_index(20_766).at_minute(20 * 60);
+        assert!(nine.in_window(window));
+        assert!(!eight_pm.in_window(window));
     }
 
     #[test]
