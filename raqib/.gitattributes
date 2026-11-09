@@ -1,0 +1,22 @@
+# The build has to give the same bytes on every machine: the executable is
+# checked on a Windows runner and built on a Linux one, and a difference in
+# line endings would make the two bundles different. Every text file is
+# therefore checked out with the same line endings everywhere.
+* text=auto eol=lf
+
+# And these are never text.
+*.exe binary
+*.dll binary
+*.so binary
+*.dylib binary
+*.zip binary
+*.gz binary
+*.tgz binary
+*.tar binary
+*.woff2 binary
+*.woff binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.ico binary
+*.pdf binary
