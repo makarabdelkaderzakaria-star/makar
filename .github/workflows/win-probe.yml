@@ -1,0 +1,26 @@
+name: win-probe
+
+on:
+  push:
+    branches:
+      - arena/3b346fad-makar
+    paths:
+      - '.github/workflows/win-probe.yml'
+
+jobs:
+  probe:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: report the machine
+        shell: pwsh
+        run: |
+          Write-Host "processors (env): $env:NUMBER_OF_PROCESSORS"
+          node -p "require('os').cpus().length + ' logical processors'"
+          node -p "'workerCount would be ' + Math.max(1, Math.min(8, require('os').cpus().length - 1))"
+          Write-Host "node at: $(Get-Command node).Source"
+          Write-Host "7zip: $(Test-Path 'C:\Program Files\7-Zip\7z.exe')"
+          Write-Host "git bash: $(Test-Path 'C:\Program Files\Git\bin\bash.exe')"
