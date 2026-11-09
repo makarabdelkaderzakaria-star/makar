@@ -85,6 +85,7 @@ export const TOOLS: ToolDefinition[] = [
         pattern: { type: 'string', description: 'Literal text or regular expression.' },
         regex: { type: 'boolean', description: 'Treat the pattern as a regular expression.' },
         caseSensitive: { type: 'boolean', description: 'Match case exactly (default false).' },
+        workers: { type: 'number', description: 'Search with exactly this many worker threads.' },
         maxResults: { type: 'number', description: 'Maximum number of matches (default 200).' },
         contextLines: { type: 'number', description: 'Lines of context around each match (default 0).' },
       },
@@ -371,13 +372,16 @@ export class RaqibMcpServer {
       caseSensitive: Boolean(args.caseSensitive),
       maxResults: Number(args.maxResults ?? 200),
       contextLines: Number(args.contextLines ?? 0),
+      ...(typeof args.workers === 'number' ? { workers: Number(args.workers) } : {}),
     });
     const evidence = makeEvidence({
       kind: 'search',
       subject: path,
       summary:
         `${result.matches.length} match(es) for ${result.regex ? '/' + pattern + '/' : `"${pattern}"`} ` +
-        `in ${result.filesScanned} file(s) across ${result.workers} worker(s) in ${result.elapsedMs.toFixed(0)} ms.`,
+        `in ${result.filesScanned} file(s) across ` +
+        `${result.workers > 0 ? `${result.workers} worker thread(s)` : 'the main thread only'} ` +
+        `in ${result.elapsedMs.toFixed(0)} ms.`,
       facts: [
         { label: 'search.pattern', value: pattern },
         { label: 'search.regex', value: String(result.regex) },
@@ -385,6 +389,7 @@ export class RaqibMcpServer {
         { label: 'search.files_scanned', value: String(result.filesScanned) },
         { label: 'search.files_with_matches', value: String(result.filesWithMatches) },
         { label: 'search.elapsed_ms', value: result.elapsedMs.toFixed(1) },
+        { label: 'search.worker_threads', value: String(result.workers) },
       ],
       locations: result.matches.slice(0, 200).map((m) => ({ file: m.file, line: m.line, column: m.column, note: m.text })),
       metrics: [

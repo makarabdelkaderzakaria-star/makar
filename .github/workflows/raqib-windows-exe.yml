@@ -107,7 +107,12 @@ jobs:
           $braveExe = "$env:RUNNER_TEMP\brave-exe.txt"
           if (Test-Path -LiteralPath $braveExe) {
             $braveExePath = (Get-Content -LiteralPath $braveExe -Raw).Trim()
-            if ($braveExePath) { $braveDir = Split-Path -Parent (Split-Path -Parent $braveExePath) }
+            if ($braveExePath) {
+              # The directory that holds brave.exe itself: that is where the
+              # browser identity is read from.
+              $braveDir = Split-Path -Parent $braveExePath
+              Write-Host "brave directory: $braveDir"
+            }
           }
           & raqib\scripts\test-windows-exe.ps1 `
             -Exe "$env:RUNNER_TEMP\clean\Raqib.exe" `

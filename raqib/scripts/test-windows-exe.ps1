@@ -58,8 +58,7 @@ function Test-Raqib {
   $script:Number += 1
   $label = "{0:d2}. {1}" -f $script:Number, $Name
 
-  $previous = $PWD
-  if ($WorkingDirectory) { $PWD = Get-Location -LiteralPath $WorkingDirectory }
+  if ($WorkingDirectory) { Push-Location -LiteralPath $WorkingDirectory }
 
   $out = ''
   $exitCode = -1
@@ -70,7 +69,7 @@ function Test-Raqib {
     $out = "could not run the executable: $($_.Exception.Message)"
   }
 
-  if ($WorkingDirectory) { $PWD = Get-Location -LiteralPath $previous }
+  if ($WorkingDirectory) { Pop-Location }
 
   $problems = @()
   if ($exitCode -ne 0) { $problems += "exit code $exitCode" }
@@ -139,9 +138,9 @@ try {
 
   Write-Section "3. a real Windows binary (notepad.exe)"
   $notepad = Join-Path $env:SystemRoot 'System32\notepad.exe'
-  $notepadReport = Test-Raqib -Name 'analyze notepad.exe' -Arguments @('analyze', $notepad) -Expect 'PE32'
+  $notepadReport = Test-Raqib -Name 'analyze notepad.exe' -Arguments @('analyze', $notepad) -Expect 'pe\.machine: x86-64'
   Note ("  (notepad reports: {0})" -f (($notepadReport -split "`r?`n" | Where-Object { $_.Trim() } | Select-Object -First 1)))
-  Test-Raqib -Name 'the PE report names its imports' -Arguments @('pe', $notepad) -Expect 'pe\.imports'
+  Test-Raqib -Name 'the PE report names its imports' -Arguments @('pe', $notepad) -Expect 'pe\.import_dlls: [0-9]+'
 
   Write-Section "4. a Chromium-family browser"
   if ($BraveDir -and (Test-Path -LiteralPath $BraveDir)) {
@@ -153,10 +152,18 @@ try {
 
   Write-Section "5. the search engine and its worker threads"
   $bigTree = Join-Path $Fixtures 'big-tree'
-  $search = Test-Raqib -Name 'search a tree of 1500 files' -Arguments @('search', $bigTree, 'FOUND') -Expect 'match\(es\)'
+  $search = Test-Raqib -Name 'search a tree of 1500 files' `
+    -Arguments @('search', $bigTree, 'FOUND', '--workers', '2') -Expect 'match\(es\)'
   if ($search -notmatch 'using (the main thread only|\d+ worker thread\(s\))') {
     $script:Failed += 1
     Note "  FAIL  the search did not say how it was run"
+  }
+  if ($search -notmatch 'using 2 worker thread\(s\)') {
+    $script:Failed += 1
+    Note "  FAIL  the search did not run on the worker threads it was asked for"
+    $script:Results += [pscustomobject]@{ number = $script:Number; name = 'the search used the worker threads'; passed = $false; exitCode = 0; detail = 'the worker pool was not used' }
+  } else {
+    $script:Results += [pscustomobject]@{ number = $script:Number; name = 'the search used the worker threads'; passed = $true; exitCode = 0; detail = '2 worker threads' }
   }
   if ($search -notmatch '\d+ match\(es\)') {
     $script:Failed += 1
@@ -172,7 +179,7 @@ try {
   Write-Section "6. compare two builds"
   Test-Raqib -Name 'compare old-build with new-build' `
     -Arguments @('compare', (Join-Path $Fixtures 'old-build'), (Join-Path $Fixtures 'new-build')) `
-    -Expect 'manifest\.version: 1\.0\.0\s+->\s+1\.1\.0'
+    -Expect 'app\.version: 1\.0\.0\s+->\s+1\.1\.0'
 
   Write-Section "7. source maps"
   $bundle = Join-Path $Fixtures 'bundle.js'
@@ -244,7 +251,7 @@ try {
   $somewhereElse = Join-Path $env:TEMP ('raqib-runs-from-' + [System.Guid]::NewGuid().ToString('N').Substring(0, 8))
   New-Item -ItemType Directory -Path $somewhereElse -Force | Out-Null
   Test-Raqib -Name 'runs from an unrelated working directory' `
-    -Arguments @('analyze', $notepad) -Expect 'PE32' -WorkingDirectory $somewhereElse
+    -Arguments @('analyze', $notepad) -Expect 'pe\.machine: x86-64' -WorkingDirectory $somewhereElse
 
   Write-Section "12. paths with spaces and Arabic characters"
 
@@ -267,7 +274,7 @@ try {
   $beside = Get-ChildItem -LiteralPath $alone
   Note ("  the folder holds: {0}" -f ($beside.Name -join ', '))
   Test-Raqib -Name 'runs with nothing beside it' `
-    -Arguments @('analyze', $notepad) -Expect 'PE32' -WorkingDirectory $alone
+    -Arguments @('analyze', $notepad) -Expect 'pe\.machine: x86-64' -WorkingDirectory $alone
 
 } catch {
   $script:Failed += 1

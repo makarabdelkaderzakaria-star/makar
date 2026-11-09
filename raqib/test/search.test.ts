@@ -89,3 +89,51 @@ test('indexes a tree by language and size', async () => {
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test('the worker threads really do the searching when they are asked for', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'raqib-search-worker-'));
+  try {
+    // A tree big enough to be worth splitting.
+    for (let i = 0; i < 60; i += 1) {
+      const sub = join(dir, `dir-${i}`);
+      await mkdir(sub, { recursive: true });
+      await writeFile(join(sub, `file-${i}.txt`), `needle in file ${i}\n`, 'utf8');
+    }
+    await writeFile(join(dir, 'top.txt'), 'needle at the top\n', 'utf8');
+
+    const result = await searchTree(dir, { pattern: 'needle', workers: 2 });
+
+    // The worker thread has to have started, not silently fallen back.
+    assert.equal(result.workers, 2);
+    assert.equal(result.matches.length, 61);
+    assert.equal(result.filesScanned, 61);
+    assert.equal(result.filesWithMatches, 61);
+    assert.ok(result.matches.some((m) => m.file.endsWith('top.txt')));
+    assert.ok(result.matches.some((m) => m.file.includes('dir-59')));
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('a worker search finds exactly what an inline search finds', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'raqib-search-parity-'));
+  try {
+    for (let i = 0; i < 40; i += 1) {
+      const sub = join(dir, `dir-${i}`);
+      await mkdir(sub, { recursive: true });
+      await writeFile(join(sub, `file-${i}.txt`), `alpha ${i}\nbeta ${i}\n`, 'utf8');
+    }
+
+    const inline = await searchTree(dir, { pattern: 'alpha', maxResults: 1000 });
+    const threaded = await searchTree(dir, { pattern: 'alpha', maxResults: 1000, workers: 3 });
+
+    assert.equal(threaded.workers, 3);
+    assert.equal(threaded.matches.length, inline.matches.length);
+    assert.deepEqual(
+      threaded.matches.map((m) => `${m.file}:${m.line}:${m.column}`),
+      inline.matches.map((m) => `${m.file}:${m.line}:${m.column}`),
+    );
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});

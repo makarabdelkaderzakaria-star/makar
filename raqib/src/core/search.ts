@@ -22,6 +22,15 @@ export interface SearchOptions {
   maxResults?: number;
   maxFileBytes?: number;
   contextLines?: number;
+  /**
+   * An explicit request for this many worker threads.
+   *
+   * Without it the search decides for itself: it only reaches for the
+   * worker pool when there is enough work for more than one thread, which
+   * on a small machine never happens. Asking for a thread explicitly is
+   * honoured even when there is only one.
+   */
+  workers?: number;
 }
 
 export interface SearchHit {
@@ -158,7 +167,9 @@ export async function searchTree(root: string, options: SearchOptions): Promise<
   });
 
   const workerFile = resolveWorkerScript();
-  const workerCountWanted = Math.min(workerCount(), Math.max(1, Math.ceil(candidates.length / 400)));
+  const workerCountWanted = typeof options.workers === 'number'
+    ? Math.max(1, Math.floor(options.workers))
+    : Math.min(workerCount(), Math.max(1, Math.ceil(candidates.length / 400)));
   const matches: SearchHit[] = [];
   let filesScanned = 0;
   let filesWithMatches = 0;
@@ -188,7 +199,7 @@ export async function searchTree(root: string, options: SearchOptions): Promise<
   };
 
   let usedWorkers = 0;
-  if (candidates.length >= 400 && workerCountWanted > 1) {
+  if (candidates.length > 0 && workerCountWanted > 1) {
     try {
       const chunkSize = Math.ceil(candidates.length / workerCountWanted);
       const chunks: typeof candidates[] = [];
@@ -246,7 +257,21 @@ function runInWorker(files: Array<{ path: string; rel: string }>, options: Searc
   return new Promise((resolve, reject) => {
     let worker: Worker;
     try {
-      worker = new Worker(resolveWorkerScript());
+      // The worker's contract is workerData: it is given the files to read
+      // and the options to read them with when it starts.
+      worker = new Worker(resolveWorkerScript(), {
+        workerData: {
+          files: files.map((f) => ({ path: f.path, rel: f.rel })),
+          options: {
+            pattern: options.pattern,
+            regex: options.regex,
+            caseSensitive: options.caseSensitive,
+            maxResults: options.maxResults,
+            maxFileBytes: options.maxFileBytes,
+            contextLines: options.contextLines,
+          },
+        },
+      });
     } catch (error) {
       reject(error);
       return;
@@ -262,17 +287,6 @@ function runInWorker(files: Array<{ path: string; rel: string }>, options: Searc
     });
     worker.on('exit', () => {
       if (!settled) reject(new Error('search worker exited without a result'));
-    });
-    worker.postMessage({
-      files: files.map((f) => ({ path: f.path, rel: f.rel })),
-      options: {
-        pattern: options.pattern,
-        regex: options.regex,
-        caseSensitive: options.caseSensitive,
-        maxResults: options.maxResults,
-        maxFileBytes: options.maxFileBytes,
-        contextLines: options.contextLines,
-      },
     });
   });
 }

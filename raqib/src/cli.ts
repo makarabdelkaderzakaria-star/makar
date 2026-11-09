@@ -43,6 +43,7 @@ interface Flags {
   line: number | null;
   column: number | null;
   source: string | null;
+  workers: number | undefined;
   out: string | null;
   positional: string[];
   help: boolean;
@@ -53,6 +54,7 @@ function parseFlags(argv: string[]): Flags {
     json: false, quiet: false, port: 8787, host: '127.0.0.1',
     regex: false, caseSensitive: false, max: 200, context: 0, depth: 64,
     kind: 'auto', line: null, column: null, source: null,
+    workers: undefined,
     out: null, positional: [], help: false,
   };
   for (let i = 0; i < argv.length; i += 1) {
@@ -73,6 +75,7 @@ function parseFlags(argv: string[]): Flags {
       case '--line': flags.line = Number(next()); break;
       case '--column': flags.column = Number(next()); break;
       case '--source': flags.source = next(); break;
+      case '--workers': flags.workers = Number(next()); break;
       case '--out': flags.out = next(); break;
       default:
         if (arg.startsWith('--max=')) flags.max = Number(arg.slice(6));
@@ -81,6 +84,7 @@ function parseFlags(argv: string[]): Flags {
         else if (arg.startsWith('--kind=')) flags.kind = arg.slice(7) as TargetKind;
         else if (arg.startsWith('--line=')) flags.line = Number(arg.slice(7));
         else if (arg.startsWith('--column=')) flags.column = Number(arg.slice(9));
+        else if (arg.startsWith('--workers=')) flags.workers = Number(arg.slice(10));
         else if (arg.startsWith('--source=')) flags.source = arg.slice(9);
         else if (arg.startsWith('-')) { /* unknown flag: ignore */ }
         else flags.positional.push(arg);
@@ -128,6 +132,7 @@ FLAGS
   --line <n>                line to resolve in a source map
   --column <n>              column to resolve in a source map
   --source <path>           original source to look for in a bundle
+  --workers <n>             search with exactly n worker threads
   --port <n>                console port (default 8787)
   --host <addr>             console host (default 127.0.0.1)
   --quiet, -q               no human-readable output
@@ -279,6 +284,7 @@ async function searchCommand(flags: Flags): Promise<number> {
     caseSensitive: flags.caseSensitive,
     maxResults: flags.max,
     contextLines: flags.context,
+    workers: flags.workers,
   });
   const human = [
     `${result.matches.length} match(es) in ${result.filesWithMatches} file(s) — ${result.filesScanned} scanned in ${formatDuration(result.elapsedMs)} using ` +
