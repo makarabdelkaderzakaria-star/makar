@@ -149,20 +149,3 @@ export async function treeIndexEvidence(path: string): Promise<Evidence> {
 export async function sourceMapReportEvidence(path: string): Promise<Evidence> {
   return sourceMapEvidence(await readSourceMap(path));
 }
-
-/** Conventional install locations for a Chromium-family browser. */
-export function browserPaths(): Array<{ label: string; path: string }> {
-  const home = process.env.HOME ?? '';
-  return [
-    { label: 'Brave (Linux)', path: '/usr/lib/brave-browser' },
-    { label: 'Brave (user)', path: join(home, '.local/share/brave-browser') },
-    { label: 'Chrome (Linux)', path: '/opt/google/chrome' },
-    { label: 'Chromium (Linux)', path: '/usr/lib/chromium' },
-    { label: 'Edge (Linux)', path: '/opt/microsoft/msedge' },
-    { label: 'Vivaldi (Linux)', path: '/opt/vivaldi' },
-    { label: 'Brave (macOS)', path: '/Applications/Brave Browser.app' },
-    { label: 'Chrome (macOS)', path: '/Applications/Google Chrome.app' },
-    { label: 'Brave (Windows)', path: 'C:\\Program Files\\BraveSoftware\\Brave-Browser' },
-    { label: 'Chrome (Windows)', path: 'C:\\Program Files\\Google\\Chrome' },
-  ];
-}
