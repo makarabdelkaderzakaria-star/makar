@@ -42,7 +42,7 @@
 
 #![cfg_attr(not(windows), allow(dead_code))]
 
-use nr_core::Config;
+use nr_core::config::Config;
 use nr_core::stats::Snapshot;
 use std::io::{self, Read, Write};
 use std::path::Path;

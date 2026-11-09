@@ -1048,6 +1048,10 @@ mod tests {
                     decision: Decision::Drop(_),
                     ..
                 } => {}
+                Outcome {
+                    decision: Decision::MarkEcn,
+                    ..
+                } => panic!("no ECN policy here"),
             }
         }
         let seconds = now as f64 / S as f64;
