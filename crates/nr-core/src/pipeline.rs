@@ -426,6 +426,7 @@ impl<const FLOWS: usize> Engine<FLOWS> {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn apply_limit(
         &mut self,
         limit_idx: u16,
@@ -1001,7 +1002,7 @@ mod tests {
         let mut retained = 0;
         let mut now = 0u64;
         for i in 0..30 {
-            match e.process(&a, Direction::Outbound, 0, u32::MAX, i, now, now / MS) {
+            match e.process(&a, Direction::Outbound, 0, u32::MAX, i, now, now / MS).decision {
                 Decision::SendNow => {}
                 Decision::Retain { due_ns } => {
                     retained += 1;
@@ -1011,12 +1012,13 @@ mod tests {
                 Decision::Drop(_) => panic!("shape policy must never drop"),
             }
         }
-        assert!(retained > 10, "per-flow shaping did nothing: {retained} retained");
-        // 30 frames x 1500 bytes at 1 MB/s cannot take less than ~45 ms.
         assert!(
-            now >= 30 * a.len() as u64 * 8 * MS,
-            "clock advanced only {now} ns"
+            retained > 10,
+            "per-flow shaping did nothing: {retained} retained"
         );
+        // 30 frames x 1500 bytes at 1 MB/s is ~45 ms; the burst covers 6 KB, so
+        // the clock must still have advanced by at least 30 ms.
+        assert!(now >= 30 * MS, "clock advanced only {now} ns");
     }
 
     #[test]

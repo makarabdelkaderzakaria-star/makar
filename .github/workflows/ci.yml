@@ -8,8 +8,8 @@ permissions:
   contents: read
 
 env:
-  CARGO_TERM_COLOR: always
-  RUSTFLAGS: -D warnings
+  CARGO_TERM_COLOR: never
+  RUST_BACKTRACE: 1
 
 jobs:
   # The Windows backend is cfg(windows) code developed on Linux. Type-check it
@@ -24,9 +24,9 @@ jobs:
           targets: x86_64-pc-windows-msvc
           components: clippy
       - name: clippy (windows target, all targets)
-        run: cargo clippy --target x86_64-pc-windows-msvc --all-targets -- -D warnings
+        run: ./scripts/ci-annotate.sh "clippy/windows" cargo clippy --target x86_64-pc-windows-msvc --all-targets -- -D warnings
       - name: check (windows target)
-        run: cargo check --target x86_64-pc-windows-msvc --all-targets
+        run: ./scripts/ci-annotate.sh "check/windows" cargo check --target x86_64-pc-windows-msvc --all-targets
 
   test:
     strategy:
@@ -40,30 +40,18 @@ jobs:
         with:
           components: rustfmt, clippy
       - name: fmt
-        run: cargo fmt --all -- --check
+        run: ./scripts/ci-annotate.sh fmt cargo fmt --all -- --check
       - name: clippy
-        run: cargo clippy --all-targets -- -D warnings
+        run: ./scripts/ci-annotate.sh clippy cargo clippy --all-targets -- -D warnings
       - name: test
-        shell: bash
-        run: |
-          set +e
-          cargo test --all 2>&1 | tee "$RUNNER_TEMP/test.log"
-          status=${PIPESTATUS[0]}
-          if [ "$status" -ne 0 ]; then
-            # The job log is large and only reachable from a browser; mirror the
-            # useful lines into check-run annotations, which the REST API serves.
-            grep -nE "^(error(\[[A-Z0-9]+\])?:|test .* FAILED|failures:|---- .* stdout ----|thread .* panicked)" \
-              "$RUNNER_TEMP/test.log" | head -25 | while IFS= read -r line; do
-              echo "::error title=cargo test::$line"
-            done
-          fi
-          exit "$status"
+        run: ./scripts/ci-annotate.sh test cargo test --all
       - name: build release
-        run: cargo build --release
+        run: ./scripts/ci-annotate.sh build cargo build --release
       - name: smoke
+        shell: bash
         run: |
           ./target/release/netrocket version
           ./target/release/netrocket init
           ./target/release/netrocket check
+          ./target/release/netrocket lint
           ./target/release/netrocket simulate --frames=500
-        shell: bash
