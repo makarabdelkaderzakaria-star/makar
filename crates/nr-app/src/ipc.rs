@@ -272,21 +272,9 @@ pub trait Stream: Read + Write + Send {}
 
 impl<T: Read + Write + Send> Stream for T {}
 
-impl Read for Box<dyn Stream> {
-    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        (**self).read(buf)
-    }
-}
-
-impl Write for Box<dyn Stream> {
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        (**self).write(buf)
-    }
-
-    fn flush(&mut self) -> io::Result<()> {
-        (**self).flush()
-    }
-}
+// `Box<dyn Stream>` needs no forwarding impls of its own: `std` already
+// implements `Read` and `Write` for `Box<R>` where `R: ?Sized`, and both traits
+// are supertraits of `Stream`.
 
 /// One accepted connection, whatever transport produced it.
 pub type Connection = Box<dyn Stream>;
@@ -362,7 +350,6 @@ mod win_pipe {
     //! any machine this project is built on; `docs/IPC.md` and `LIMITATIONS.md`
     //! say so explicitly.
 
-    use super::Stream;
     use std::ffi::{c_void, OsStr};
     use std::io::{self, Read, Write};
     use std::os::windows::ffi::OsStrExt;
