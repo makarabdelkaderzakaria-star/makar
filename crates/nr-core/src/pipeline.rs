@@ -20,7 +20,7 @@
 //! longer than `max_retain_ms` (default 250 ms), which is below the smallest
 //! plausible TCP RTO. So nothing we retain is ever retransmitted on our account.
 
-use crate::config::{Config, Limits, OverLimitPolicy};
+use crate::config::{Config, LimitScope, Limits, OverLimitPolicy};
 use crate::flow::{FlowKey, FlowTable};
 use crate::gcra::Gcra;
 use crate::identity::{IdentityCache, Lookup, ProcKey, Resolver};
@@ -95,6 +95,7 @@ pub struct Engine<const FLOWS: usize = 8192> {
     rules: CompiledRules,
     gcra: Vec<Gcra>,
     policy: Vec<OverLimitPolicy>,
+    scope: Vec<LimitScope>,
     name_ids: Vec<u32>,
     scheduler: Scheduler<u64>,
     stats: Counters,
@@ -114,6 +115,7 @@ impl<const FLOWS: usize> Engine<FLOWS> {
             rules: CompiledRules::default(),
             gcra: Vec::new(),
             policy: Vec::new(),
+            scope: Vec::new(),
             name_ids: Vec::new(),
             scheduler,
             stats: Counters::default(),
@@ -128,23 +130,31 @@ impl<const FLOWS: usize> Engine<FLOWS> {
     pub fn reload_limits(&mut self) {
         let mut gcra = Vec::with_capacity(self.config.limits.len());
         let mut policy = Vec::with_capacity(self.config.limits.len());
+        let mut scope = Vec::with_capacity(self.config.limits.len());
         for l in &self.config.limits {
             let burst = l.burst_bytes.max(4 * u64::from(crate::config::MTU_BYTES));
             match Gcra::new(l.rate_bps, burst) {
                 Ok(g) => {
                     gcra.push(g);
                     policy.push(l.policy);
+                    scope.push(l.scope);
                 }
                 Err(_) => {
                     // Invalid limits were rejected at load; keep the index
                     // aligned so rule indices stay meaningful.
                     gcra.push(Gcra::new(1_000, 1500).expect("fallback is valid"));
                     policy.push(OverLimitPolicy::Shape);
+                    scope.push(l.scope);
                 }
             }
         }
         self.gcra = gcra;
         self.policy = policy;
+        self.scope = scope;
+        // Per-flow state lives in the flow rows; a reload changes the *rate*
+        // those rows are interpreted with, so their timestamps must be dropped
+        // (attribution itself stays, so nothing re-walks the rule table).
+        self.flows.clear_rate_state();
     }
 
     /// Install a compiled rule table.
@@ -299,7 +309,14 @@ impl<const FLOWS: usize> Engine<FLOWS> {
                     .rules
                     .evaluate(&pkt, direction, proc_id, v6)
                     .map(|(_, a)| a);
-                return self.apply_action_stateless(action, &pkt, direction, token, now_ns);
+                return self.apply_action_stateless(
+                    action,
+                    &pkt,
+                    direction,
+                    token,
+                    now_ns,
+                    now_ms_evict,
+                );
             };
             if created {
                 self.stats.flows_created += 1;
@@ -359,7 +376,9 @@ impl<const FLOWS: usize> Engine<FLOWS> {
                     limit: None,
                 }
             }
-            Action::Limit(li) => self.apply_limit(li, &pkt, direction, &key, token, now_ns),
+            Action::Limit(li) => {
+                self.apply_limit(li, &pkt, direction, &key, token, now_ns, now_ms_evict)
+            }
             Action::Pass => {
                 // No rule: carry on. This is the common case on a machine with
                 // a handful of rules, and it costs one branch.
@@ -381,6 +400,7 @@ impl<const FLOWS: usize> Engine<FLOWS> {
         direction: Direction,
         token: u64,
         now_ns: u64,
+        now_ms: u64,
     ) -> Outcome {
         let key = FlowKey::from_packet(pkt, direction, 0);
         match action {
@@ -392,7 +412,9 @@ impl<const FLOWS: usize> Engine<FLOWS> {
                     limit: None,
                 }
             }
-            Some(Action::Limit(li)) => self.apply_limit(li, pkt, direction, &key, token, now_ns),
+            Some(Action::Limit(li)) => {
+                self.apply_limit(li, pkt, direction, &key, token, now_ns, now_ms)
+            }
             _ => {
                 self.stats.allowed += 1;
                 Outcome {
@@ -412,16 +434,18 @@ impl<const FLOWS: usize> Engine<FLOWS> {
         key: &FlowKey,
         token: u64,
         now_ns: u64,
+        now_ms: u64,
     ) -> Outcome {
         let li = limit_idx as usize;
-        let Some(lane) = self.gcra.get_mut(li) else {
+        if self.gcra.get(li).is_none() {
+            // Stale rule index: forward, never silently tighten.
             self.stats.allowed += 1;
             return Outcome {
                 decision: Decision::SendNow,
                 flow: Some(*key),
                 limit: Some(limit_idx),
             };
-        };
+        }
         let policy = self
             .policy
             .get(li)
@@ -429,7 +453,19 @@ impl<const FLOWS: usize> Engine<FLOWS> {
             .unwrap_or(OverLimitPolicy::Shape);
         let len = pkt.accounted_len();
 
-        if lane.try_acquire(len, now_ns) {
+        let (conforms, wait) = match self.scope.get(li).copied().unwrap_or_default() {
+            // One bucket for the whole process: the shared lane.
+            LimitScope::Process => self.acquire_shared(li, len, now_ns),
+            // One bucket per flow: the state is the row's own `state` word.
+            // `None` means the table is full; fall back to the shared lane so
+            // the packet is still shaped, just pooled with the process.
+            LimitScope::Flow => match self.acquire_per_flow(li, key, len, now_ns, now_ms) {
+                Some(res) => res,
+                None => self.acquire_shared(li, len, now_ns),
+            },
+        };
+
+        if conforms {
             self.stats.rate_ok += 1;
             return Outcome {
                 decision: Decision::SendNow,
@@ -440,7 +476,6 @@ impl<const FLOWS: usize> Engine<FLOWS> {
 
         // Over limit.
         self.stats.rate_over += 1;
-        let wait = lane.check(now_ns).unwrap_or(u64::MAX);
         match policy {
             OverLimitPolicy::Drop => {
                 self.stats.dropped_policy += 1;
@@ -513,11 +548,68 @@ impl<const FLOWS: usize> Engine<FLOWS> {
     ///
     /// This is the correction to the original's central bug: tokens are charged
     /// at emission, so a policy of "delay" really delays instead of pretending.
-    pub fn on_emitted(&mut self, limit_idx: u16, len: u32, now_ns: u64) {
-        if let Some(lane) = self.gcra.get_mut(limit_idx as usize) {
-            lane.commit(len, now_ns);
+    pub fn on_emitted(&mut self, flow: FlowKey, limit_idx: u16, len: u32, now_ns: u64) {
+        let li = limit_idx as usize;
+        match self.scope.get(li).copied().unwrap_or_default() {
+            LimitScope::Process => {
+                if let Some(lane) = self.gcra.get_mut(li) {
+                    lane.commit(len, now_ns);
+                }
+            }
+            LimitScope::Flow => match (self.gcra.get(li).copied(), self.flows.get_mut(&flow)) {
+                (Some(template), Some(entry)) => {
+                    let mut lane = template;
+                    lane.set_tat(entry.state);
+                    lane.commit(len, now_ns);
+                    entry.state = lane.tat();
+                }
+                // The row was swept while the packet was retained (only
+                // possible if the retention ceiling outlived the flow idle
+                // timeout, which the defaults do not do). There is no per-flow
+                // state left to charge; charge nothing rather than inventing it.
+                _ => {}
+            },
         }
         self.stats.emitted_from_retention += 1;
+    }
+
+    /// Charge the *flow's own* lane and report `(conforms, wait_ns)`.
+    ///
+    /// Returns `None` when the flow table has no room for a new row, so the
+    /// caller can fall back to the shared lane.
+    ///
+    /// The lane is a copy of the configured one, with the flow's stored TAT
+    /// swapped in and the new TAT written back: one `u64` of state per
+    /// connection, no table of its own, and no borrow of two `self` fields at
+    /// once.
+    fn acquire_per_flow(
+        &mut self,
+        li: usize,
+        key: &FlowKey,
+        len: u32,
+        now_ns: u64,
+        now_ms: u64,
+    ) -> Option<(bool, u64)> {
+        let template = *self.gcra.get(li)?;
+        let (entry, _) = self.flows.get_or_insert(key, now_ms)?;
+        let mut lane = template;
+        lane.set_tat(entry.state);
+        let conforms = lane.try_acquire(len, now_ns);
+        let wait = lane.check(now_ns).unwrap_or(u64::MAX);
+        entry.state = lane.tat();
+        Some((conforms, wait))
+    }
+
+    /// Charge the shared per-process lane and report `(conforms, wait_ns)`.
+    ///
+    /// Returns `(true, 0)` when the limit index has no lane at all: that can
+    /// only happen for a stale rule index, and forwarding is the safe answer.
+    fn acquire_shared(&mut self, li: usize, len: u32, now_ns: u64) -> (bool, u64) {
+        let Some(lane) = self.gcra.get_mut(li) else {
+            return (true, 0);
+        };
+        let conforms = lane.try_acquire(len, now_ns);
+        (conforms, lane.check(now_ns).unwrap_or(u64::MAX))
     }
 
     /// Sweep idle flows and expired identities. Call from a slow tick (1 s).
@@ -627,6 +719,12 @@ mod tests {
     const MS: u64 = 1_000_000;
     const S: u64 = 1_000_000_000;
 
+    /// Canonical flow key for a frame, exactly as `process` computes it.
+    fn key_of(frame: &[u8], dir: Direction, pid: u32) -> FlowKey {
+        let view = PacketView::parse(frame).expect("test frame parses");
+        FlowKey::from_packet(&view, dir, pid)
+    }
+
     fn engine_with(limits: Vec<Limits>) -> Engine<1024> {
         let mut cfg = Config::default();
         for l in limits {
@@ -684,7 +782,7 @@ mod tests {
                 Decision::Retain { due_ns } => {
                     retained += 1;
                     // Emit it at its due time and charge the lane.
-                    e.on_emitted(0, f.len() as u32, due_ns);
+                    e.on_emitted(key_of(&f, Direction::Outbound, 0), 0, f.len() as u32, due_ns);
                     now = due_ns;
                 }
                 Decision::Drop(_) => panic!("should not drop while shaping"),
@@ -712,7 +810,7 @@ mod tests {
                     decision: Decision::Retain { due_ns },
                     ..
                 } => {
-                    e.on_emitted(0, f.len() as u32, due_ns);
+                    e.on_emitted(key_of(&f, Direction::Outbound, 0), 0, f.len() as u32, due_ns);
                     now = due_ns;
                     emitted_bytes += f.len() as u64;
                 }
@@ -826,11 +924,124 @@ mod tests {
                 .process(&f, Direction::Outbound, 0, u32::MAX, 0, now, now / MS)
                 .decision
             {
-                e.on_emitted(0, f.len() as u32, due_ns);
+                e.on_emitted(key_of(&f, Direction::Outbound, 0), 0, f.len() as u32, due_ns);
                 now = due_ns;
             }
         }
         e.set_rate("tight", 100_000).unwrap();
         assert_eq!(e.config().limit("tight").unwrap().rate_bps, 100_000);
+    }
+
+    // -----------------------------------------------------------------------
+    // per-flow vs process scope
+    // -----------------------------------------------------------------------
+
+    /// Engine with one 8 Mbit/s limit (1 MB/s, ~1.5 ms per 1500-byte frame,
+    /// 6 KB burst => four frames fit in the burst window) and a rule that
+    /// attaches it to outbound TCP 443.
+    fn scope_engine(scope: LimitScope) -> Engine<1024> {
+        let mut cfg = Config::default();
+        cfg.upsert(
+            Limits::new("tight")
+                .bits(8_000_000)
+                .burst(6000)
+                .scope(scope),
+        )
+        .unwrap();
+        let mut e = Engine::new(cfg);
+        let rules = vec!["limit=tight : tcp dport 443".to_owned()];
+        let (_, compiled) = Engine::<1024>::compile_rules(&rules, &e.config.limits).unwrap();
+        e.set_rules(compiled);
+        e
+    }
+
+    fn conn(src_port: u16) -> Vec<u8> {
+        tcp_v4([10, 0, 0, 1], src_port, [1, 1, 1, 1], 443, &[0; 1460])
+    }
+
+    /// Drain one flow's burst at `now`, then check a *second* flow at the same
+    /// instant. With `per-flow` the second flow must be untouched; with
+    /// `process` scope it must inherit the first flow's debt.
+    #[test]
+    fn per_flow_scope_keeps_a_bucket_per_connection() {
+        let a = conn(51515);
+        let b = conn(51516);
+
+        // per-flow: B is not starved by A.
+        let mut e = scope_engine(LimitScope::Flow);
+        for i in 0..4 {
+            let out = e.process(&a, Direction::Outbound, 0, u32::MAX, i, 0, 0);
+            assert_eq!(out.decision, Decision::SendNow, "flow A packet {i} of burst");
+        }
+        let over = e.process(&a, Direction::Outbound, 0, u32::MAX, 10, 0, 0);
+        assert!(!over.is_send_now(), "flow A must be limited after its burst");
+        let fresh = e.process(&b, Direction::Outbound, 0, u32::MAX, 11, 0, 0);
+        assert!(
+            fresh.is_send_now(),
+            "flow B was starved by flow A's debt: per-flow scope did nothing"
+        );
+
+        // process scope: the same two flows share one bucket, which is the
+        // documented default and must not have changed.
+        let mut e = scope_engine(LimitScope::Process);
+        for i in 0..4 {
+            e.process(&a, Direction::Outbound, 0, u32::MAX, i, 0, 0);
+        }
+        let shared = e.process(&b, Direction::Outbound, 0, u32::MAX, 11, 0, 0);
+        assert!(
+            !shared.is_send_now(),
+            "process scope must keep one shared bucket"
+        );
+    }
+
+    #[test]
+    fn per_flow_scope_still_enforces_the_rate_of_one_flow() {
+        let mut e = scope_engine(LimitScope::Flow);
+        let a = conn(51515);
+        let mut retained = 0;
+        let mut now = 0u64;
+        for i in 0..30 {
+            match e.process(&a, Direction::Outbound, 0, u32::MAX, i, now, now / MS) {
+                Decision::SendNow => {}
+                Decision::Retain { due_ns } => {
+                    retained += 1;
+                    e.on_emitted(key_of(&a, Direction::Outbound, 0), 0, a.len() as u32, due_ns);
+                    now = due_ns;
+                }
+                Decision::Drop(_) => panic!("shape policy must never drop"),
+            }
+        }
+        assert!(retained > 10, "per-flow shaping did nothing: {retained} retained");
+        // 30 frames x 1500 bytes at 1 MB/s cannot take less than ~45 ms.
+        assert!(
+            now >= 30 * a.len() as u64 * 8 * MS,
+            "clock advanced only {now} ns"
+        );
+    }
+
+    #[test]
+    fn on_emitted_charges_only_the_emitting_flow() {
+        let mut e = scope_engine(LimitScope::Flow);
+        let a = conn(51515);
+        let b = conn(51516);
+        // Both flows exist and are conforming at t = 0.
+        assert!(e.process(&b, Direction::Outbound, 0, u32::MAX, 0, 0, 0).is_send_now());
+        for i in 0..4 {
+            e.process(&a, Direction::Outbound, 0, u32::MAX, i, 0, 0);
+        }
+        let due = match e.process(&a, Direction::Outbound, 0, u32::MAX, 20, 0, 0).decision {
+            Decision::Retain { due_ns } => due_ns,
+            other => panic!("flow A should have been retained, got {other:?}"),
+        };
+        let key_a = key_of(&a, Direction::Outbound, 0);
+        let key_b = key_of(&b, Direction::Outbound, 0);
+        let b_before = e.flows().get(&key_b).map_or(0, |f| f.state);
+        e.on_emitted(key_a, 0, a.len() as u32, due);
+        let a_after = e.flows().get(&key_a).map_or(0, |f| f.state);
+        let b_after = e.flows().get(&key_b).map_or(0, |f| f.state);
+        assert!(a_after > 0, "emitting must charge flow A");
+        assert_eq!(b_after, b_before, "emitting flow A must not charge flow B");
+        let b_now = e.process(&b, Direction::Outbound, 0, u32::MAX, 21, due, due / MS);
+        assert!(b_now.is_send_now(), "flow B inherited flow A's charge");
     }
 }

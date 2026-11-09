@@ -52,7 +52,7 @@ pub mod scheduler;
 pub mod stats;
 
 pub use attribution::{FlowAttribution, FlowEvent, SeedReport, SnapshotEntry};
-pub use config::{Config, Limits, OverLimitPolicy};
+pub use config::{Config, LimitScope, Limits, OverLimitPolicy};
 pub use error::{ConfigError, ParseError, RuleError};
 pub use flow::{Endpoint, FlowKey, FlowTable};
 pub use gcra::Gcra;

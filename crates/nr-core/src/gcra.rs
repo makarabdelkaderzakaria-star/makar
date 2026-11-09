@@ -106,6 +106,21 @@ impl Gcra {
         self.tat = 0;
     }
 
+    /// Overwrite the theoretical arrival time.
+    ///
+    /// Used by the pipeline to *borrow* a configured lane for a single packet:
+    /// a per-flow limit keeps one `u64` of state in the flow's own table row
+    /// (`FlowEntry::state`) instead of one lane per connection, so the lane is
+    /// copied out, its TAT restored, used, and the new TAT written back. Rate,
+    /// burst and the derived intervals stay in the configured lane.
+    ///
+    /// This is the only writer of `tat` that is not monotone, which is why it is
+    /// not used anywhere on the shared per-process path.
+    #[inline]
+    pub fn set_tat(&mut self, tat: u64) {
+        self.tat = tat;
+    }
+
     /// Departure interval for a packet of `len` bytes, in ns.
     #[inline]
     #[must_use]

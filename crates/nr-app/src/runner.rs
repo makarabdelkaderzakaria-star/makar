@@ -121,7 +121,7 @@ pub fn simulate(loaded: &crate::configio::Loaded, args: &SimArgs) -> Result<SimO
     let offered_bps = 64_000_000u64; // 64 Mbit/s offered load
     let mut forwarded = 0u64;
     let mut forwarded_bytes = 0u64;
-    let mut limit_of: HashMap<u64, u16> = HashMap::new();
+    let mut limit_of: HashMap<u64, (u16, nr_core::FlowKey)> = HashMap::new();
     let mut rates = Rates::default();
     let mut peaks = 0u64;
     let mut idx = 0usize;
@@ -182,8 +182,11 @@ pub fn simulate(loaded: &crate::configio::Loaded, args: &SimArgs) -> Result<SimO
                 forwarded_bytes += len as u64;
             }
             Decision::Retain { .. } => {
-                if let Some(li) = outcome.limit {
-                    limit_of.insert(token, li);
+                // Remember both the limit and the flow: a `per-flow` limit is
+                // charged against the flow's own row when the packet is
+                // actually emitted, not when it is admitted.
+                if let (Some(li), Some(flow)) = (outcome.limit, outcome.flow) {
+                    limit_of.insert(token, (li, flow));
                 }
             }
             Decision::Drop(_) => {}
@@ -198,8 +201,8 @@ pub fn simulate(loaded: &crate::configio::Loaded, args: &SimArgs) -> Result<SimO
             if transport.send(&frame, token).is_ok() {
                 forwarded += 1;
                 forwarded_bytes += frame.len() as u64;
-                if let Some(li) = limit_of.remove(&token) {
-                    engine.on_emitted(li, frame.len() as u32, virtual_ns);
+                if let Some((li, flow)) = limit_of.remove(&token) {
+                    engine.on_emitted(flow, li, frame.len() as u32, virtual_ns);
                 }
             }
         }
@@ -228,8 +231,8 @@ pub fn simulate(loaded: &crate::configio::Loaded, args: &SimArgs) -> Result<SimO
         if transport.send(&frame, token).is_ok() {
             forwarded += 1;
             forwarded_bytes += frame.len() as u64;
-            if let Some(li) = limit_of.remove(&token) {
-                engine.on_emitted(li, frame.len() as u32, flush_at);
+            if let Some((li, flow)) = limit_of.remove(&token) {
+                engine.on_emitted(flow, li, frame.len() as u32, flush_at);
             }
         }
     }
@@ -497,8 +500,10 @@ pub fn run(loaded: crate::configio::Loaded, args: &RunArgs) -> Result<(), String
 
     let clock = Clock::new();
     let mut resolver = WinResolver::new();
-    // Token -> (injection context, limit index) for packets currently held.
-    let mut held: std::collections::HashMap<u64, (InjectContext, u16, u32)> =
+    // Token -> (injection context, limit index, frame length, flow) for packets
+    // currently held. The flow travels with the packet because a `per-flow`
+    // limit charges the flow's own bucket when the packet is emitted.
+    let mut held: std::collections::HashMap<u64, (InjectContext, u16, u32, nr_core::FlowKey)> =
         std::collections::HashMap::with_capacity(4096);
     let mut next_token = 1u64;
     let mut last_tick = clock.now_ms();
@@ -596,14 +601,20 @@ pub fn run(loaded: crate::configio::Loaded, args: &RunArgs) -> Result<(), String
                 }
             }
             Decision::Retain { .. } => {
-                held.insert(
-                    this_token,
-                    (
-                        InjectContext::new(direction, 0),
-                        outcome.limit.unwrap_or(0),
-                        frame.len() as u32,
-                    ),
-                );
+                // A retained packet always has a flow: the engine only retains
+                // frames that parsed, and a frame that did not parse is
+                // forwarded, never held. Guard anyway rather than invent a key.
+                if let Some(flow) = outcome.flow {
+                    held.insert(
+                        this_token,
+                        (
+                            InjectContext::new(direction, 0),
+                            outcome.limit.unwrap_or(0),
+                            frame.len() as u32,
+                            flow,
+                        ),
+                    );
+                }
             }
             Decision::Drop(_) => {}
         }
@@ -615,11 +626,11 @@ pub fn run(loaded: crate::configio::Loaded, args: &RunArgs) -> Result<(), String
             due.push((d.frame.to_vec(), d.addr));
         });
         for (frame, token) in due {
-            if let Some((ctx, limit, len)) = held.remove(&token) {
+            if let Some((ctx, limit, len, flow)) = held.remove(&token) {
                 if !args.monitor && interceptor.send_deferred(&frame, ctx).is_err() {
                     send_failures += 1;
                 }
-                engine.on_emitted(limit, len, due_now);
+                engine.on_emitted(flow, limit, len, due_now);
             }
         }
 

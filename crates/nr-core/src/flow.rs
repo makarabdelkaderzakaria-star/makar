@@ -101,7 +101,12 @@ pub const NO_RULE: u32 = u32::MAX - 1;
 pub struct FlowEntry {
     /// Monotonic tick of the last packet seen (milliseconds).
     pub last_seen_ms: u64,
-    /// The stable rate-control state (packet index, or GCRA TAT).
+    /// Per-flow rate-control state: the GCRA theoretical arrival time (ns) for
+    /// limits configured with `per-flow` scope, `0` otherwise.
+    ///
+    /// Storing it here instead of allocating a lane per connection is what makes
+    /// `per-flow` cost the same as `process` scope: one `u64` in a row that
+    /// already exists, not a new table keyed by the same 5-tuple.
     pub state: u64,
     /// The identity this flow was resolved to (index into the identity cache).
     pub identity: u32,
@@ -224,6 +229,38 @@ impl<const CAP: usize> FlowTable<CAP> {
             match &self.slots[(start + i) & (CAP - 1)] {
                 None => return None,
                 Some((k, v)) if k == key => return Some(v),
+                Some(_) => {}
+            }
+        }
+        None
+    }
+
+    /// Forget every flow's rate-control state while keeping the rows.
+    ///
+    /// Called when the limit table is reloaded: the rows are still valid (they
+    /// carry attribution), but their GCRA timestamps were produced under the
+    /// old rates and would otherwise hand out a free burst.
+    pub fn clear_rate_state(&mut self) {
+        for slot in &mut self.slots {
+            if let Some((_, entry)) = slot {
+                entry.state = 0;
+            }
+        }
+    }
+
+    /// Look up a flow without creating it, mutably.
+    ///
+    /// `last_seen_ms` is deliberately *not* touched: this is for writing back
+    /// per-flow rate-control state when a retained packet is finally emitted,
+    /// and touching the timestamp there would keep a silent flow alive.
+    #[inline]
+    pub fn get_mut(&mut self, key: &FlowKey) -> Option<&mut FlowEntry> {
+        let start = Self::hash(key);
+        for i in 0..CAP {
+            let idx = (start + i) & (CAP - 1);
+            match &mut self.slots[idx] {
+                None => return None,
+                Some((k, v)) if *k == *key => return Some(v),
                 Some(_) => {}
             }
         }
