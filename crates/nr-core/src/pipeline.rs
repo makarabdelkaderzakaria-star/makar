@@ -1328,11 +1328,11 @@ mod tests {
         e.restore_cap_usage("budget", 9_000, 20_765);
         assert_eq!(e.cap_usage()[0].used, 0);
 
-        // One from today is.
+        // One from today is, and it is enforced: 1000 bytes are left, which is
+        // less than one 1500-byte frame, so the next packet is refused.
         e.restore_cap_usage("budget", 9_000, 20_766);
         assert_eq!(e.cap_usage()[0].used, 9_000);
-        assert_eq!(decision_of(&mut e, &f, 0), Decision::SendNow);
-        assert_eq!(decision_of(&mut e, &f, 1), Decision::Drop(DropReason::Cap));
+        assert_eq!(decision_of(&mut e, &f, 0), Decision::Drop(DropReason::Cap));
 
         // A name that is not configured is ignored rather than invented.
         e.restore_cap_usage("not-a-limit", 500, 20_766);
