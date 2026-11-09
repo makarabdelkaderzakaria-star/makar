@@ -1404,23 +1404,28 @@ mod tests {
 
     #[test]
     fn a_window_that_wraps_midnight_works_the_same_way() {
-        let inside = Calendar::from_day_index(20_766).at_minute(23 * 60);
-        let before = Calendar::from_day_index(20_766).at_minute(3 * 60);
-        let outside = Calendar::from_day_index(20_766).at_minute(12 * 60);
-        let mut e = spec_engine("burst 1500 schedule 22:00-06:00");
         let f = conn(51515);
+        // 23:00 and 03:00 are inside `22:00-06:00`, and a 1500-byte budget is
+        // spent by the first frame there -- a fresh engine per instant, because
+        // a shaped flow carries its rate history to the next check.
+        for minute in [23 * 60, 3 * 60] {
+            let mut e = spec_engine("cap 1500/day schedule 22:00-06:00");
+            e.set_calendar(Calendar::from_day_index(20_766).at_minute(minute));
+            assert_eq!(decision_of(&mut e, &f, 0), Decision::SendNow);
+            assert_eq!(
+                decision_of(&mut e, &f, 1),
+                Decision::Drop(DropReason::Cap),
+                "minute {minute} must be inside the window"
+            );
+        }
 
-        e.set_calendar(inside);
-        let held = (0..6)
-            .filter(|token| decision_of(&mut e, &f, *token) != Decision::SendNow)
-            .count();
-        assert!(held > 0, "23:00 is inside an overnight window");
-
-        // 03:00 is still inside, 12:00 is not.
-        e.set_calendar(before);
-        assert_eq!(decision_of(&mut e, &f, 6), Decision::SendNow);
-        e.set_calendar(outside);
-        assert_eq!(decision_of(&mut e, &f, 7), Decision::SendNow);
+        // 12:00 is outside it: nothing is charged, so nothing drops.
+        let mut e = spec_engine("cap 1500/day schedule 22:00-06:00");
+        e.set_calendar(Calendar::from_day_index(20_766).at_minute(12 * 60));
+        for token in 0..4 {
+            assert_eq!(decision_of(&mut e, &f, token), Decision::SendNow);
+        }
+        assert_eq!(e.cap_usage()[0].used, 0);
     }
 
     #[test]
