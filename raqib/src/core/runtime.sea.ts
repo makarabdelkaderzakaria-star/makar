@@ -35,3 +35,13 @@ export function siblingWorker(): string {
 export function resolveWorkerScript(): string {
   return materialiseWorker();
 }
+
+/**
+ * How this copy of Raqib should be started again.
+ *
+ * Inside the executable there is no script to point at: the executable is
+ * the program, and it is the thing that has to be run.
+ */
+export function selfCommand(): { command: string; args: string[] } {
+  return { command: process.execPath, args: ['mcp'] };
+}

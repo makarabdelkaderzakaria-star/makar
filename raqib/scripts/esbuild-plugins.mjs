@@ -102,8 +102,11 @@ export const runtimeFlavour = (flavour) => ({
     const files = { node: 'runtime.ts', sea: 'runtime.sea.ts' };
     const file = files[flavour];
     if (!file) throw new Error(`unknown runtime flavour: ${flavour}`);
-    pluginBuild.onResolve({ filter: /^\.\/runtime\.js$/ }, (args) => ({
-      path: resolve(args.resolveDir, file),
+    // The runtime is imported from inside `core` and from the entry point
+    // beside it, so both spellings have to be caught. The target is worked
+    // out from the project root, so the two spellings cannot drift apart.
+    pluginBuild.onResolve({ filter: /^\.\/(core\/)?runtime\.js$/ }, () => ({
+      path: resolve(root, 'src', 'core', file),
     }));
   },
 });

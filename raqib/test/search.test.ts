@@ -1,10 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { searchTree } from '../src/core/search.js';
 import { indexTree } from '../src/core/indexer.js';
+import { selfCommand } from '../src/core/runtime.js';
 
 async function fixture(): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), 'raqib-search-'));
@@ -135,5 +137,21 @@ test('a worker search finds exactly what an inline search finds', async () => {
     );
   } finally {
     await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('the program knows how to start itself again', () => {
+  // `raqib setup` writes this into the configuration of a local agent, so
+  // it has to point at the program that is actually there.
+  const self = selfCommand();
+  assert.equal(typeof self.command, 'string');
+  assert.ok(self.command.length > 0);
+  assert.ok(Array.isArray(self.args));
+  assert.equal(self.args[self.args.length - 1], 'mcp');
+  if (self.args.length > 1) {
+    // The ordinary build: the node that runs the script, then the script.
+    // The script is whichever file this build was made from.
+    assert.ok(self.args[0].endsWith('.mjs'), self.args[0]);
+    assert.ok(existsSync(self.args[0]), self.args[0]);
   }
 });

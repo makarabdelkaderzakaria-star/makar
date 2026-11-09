@@ -15,7 +15,9 @@
     "typecheck": "tsc --noEmit",
     "build": "node scripts/build.mjs",
     "test": "node scripts/build.mjs --tests && node --test \"dist/test/*.test.mjs\"",
-    "bench": "node scripts/build.mjs && node bench/bench.mjs"
+    "bench": "node scripts/build.mjs && node bench/bench.mjs",
+    "build:exe": "node scripts/build.mjs && node scripts/build-sea.mjs",
+    "package:windows": "node scripts/build-info.mjs && node scripts/package-windows.mjs"
   },
   "devDependencies": {
     "@fontsource/bricolage-grotesque": "^5.3.0",

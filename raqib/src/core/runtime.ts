@@ -53,3 +53,14 @@ export function resolveWorkerScript(): string {
   if (beside) return beside;
   return materialiseWorker();
 }
+
+/**
+ * How this copy of Raqib should be started again.
+ *
+ * `raqib setup` writes this into the configuration of a local agent, so it
+ * has to point at the program that is actually there: the script and the
+ * node that runs it.
+ */
+export function selfCommand(): { command: string; args: string[] } {
+  return { command: process.execPath, args: [fileURLToPath(import.meta.url), 'mcp'] };
+}

@@ -41,10 +41,11 @@ jobs:
           Set-Location raqib
           node scripts/build.mjs *>&1 | Tee-Object -FilePath "$env:RUNNER_TEMP\logs\build.log"
           if ($LASTEXITCODE -ne 0) { throw "the script build failed" }
-          # The base runtime is the very node that is running this step, so the
-          # executable carries the same JavaScript engine as the machine it
-          # was built on.
-          node scripts/build-sea.mjs --node (node -p "process.execPath") *>&1 |
+          # The base runtime is the official Windows build of Node, taken
+          # from the npm registry. The same bytes are used everywhere, so
+          # the executable that comes out of the build machine is the same
+          # one that can be built on any other machine.
+          node scripts/build-sea.mjs *>&1 |
             Tee-Object -FilePath "$env:RUNNER_TEMP\logs\sea.log"
           if ($LASTEXITCODE -ne 0) { throw "the executable build failed" }
 
@@ -167,6 +168,16 @@ jobs:
         run: |
           $ErrorActionPreference = 'Continue'
           Start-Transcript -Path "$env:RUNNER_TEMP\logs\publish.log" | Out-Null
+          # The distribution archive: the executable, the documentation and
+          # the checksum, in one file.
+          if (Test-Path -LiteralPath "$env:RUNNER_TEMP\results.json") {
+            Copy-Item -LiteralPath "$env:RUNNER_TEMP\results.json" -Destination 'raqib\dist\results.json' -Force
+          }
+          Set-Location raqib
+          node scripts/build-info.mjs *>&1 | Out-Null
+          node scripts/package-windows.mjs *>&1 | Tee-Object -FilePath "$env:RUNNER_TEMP\logs\package.log"
+          $zipName = "Raqib-$env:RAQIB_VERSION-windows-x64.zip"
+          Set-Location ..
           $sha = (Get-FileHash -LiteralPath 'raqib\dist\Raqib.exe' -Algorithm SHA256).Hash.ToLower()
           Set-Content -Path 'raqib\dist\SHA256' -Value $sha -Encoding ascii
           Set-Content -Path 'raqib\dist\SHA256SUMS' -Value "$sha  Raqib.exe" -Encoding ascii
@@ -189,17 +200,31 @@ jobs:
               -F draft=true -F prerelease=false | ConvertFrom-Json
             Write-Host "created release $($release.id)"
           }
-          $upload = $release.upload_url -replace '{\?name,label}', ''
+          # The template still carries its placeholders; they have to go.
+          $upload = (($release.upload_url -replace '{\?name,label}', '') -replace '{\/assets}', '')
 
           function Upload-Asset {
             param([string]$Path, [string]$Name)
+            if (-not (Test-Path -LiteralPath $Path)) { Write-Host "skipped $Name (no such file)"; return }
+            # An asset of the same name has to go first: the API refuses to
+            # put a second file under a name that is already taken, and a
+            # stale file from an earlier run is worse than no file.
+            $existing = gh api "repos/$env:GITHUB_REPOSITORY/releases/$($release.id)/assets" 2>$null |
+              ConvertFrom-Json
+            @($existing) | Where-Object { $_.name -eq $Name } | ForEach-Object {
+              gh api "repos/$env:GITHUB_REPOSITORY/releases/assets/$($_.id)" --method DELETE | Out-Null
+              Write-Host "removed the older $Name"
+            }
             $url = "$upload`?name=$Name&label=$Name"
             gh api $url --method POST --input $Path -H 'Content-Type: application/octet-stream' | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw "the upload of $Name failed" }
             Write-Host "uploaded $Name"
           }
           Upload-Asset -Path 'raqib\dist\Raqib.exe' -Name 'Raqib.exe'
           Upload-Asset -Path 'raqib\dist\SHA256' -Name 'SHA256'
           Upload-Asset -Path 'raqib\dist\SHA256SUMS' -Name 'SHA256SUMS'
+          Upload-Asset -Path 'raqib\dist\SHA256SUMS.zip' -Name 'SHA256SUMS.zip'
+          Upload-Asset -Path "raqib\dist\$zipName" -Name $zipName
           if (Test-Path -LiteralPath "$env:RUNNER_TEMP\results.json") {
             Copy-Item -LiteralPath "$env:RUNNER_TEMP\results.json" -Destination 'raqib\dist\results.json' -Force
             Upload-Asset -Path 'raqib\dist\results.json' -Name 'results.json'

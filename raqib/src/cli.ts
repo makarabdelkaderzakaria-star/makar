@@ -24,6 +24,7 @@ import { diffEvidence, diffEvidenceRecord } from './core/diff.js';
 import { manifestEvidence } from './core/manifest.js';
 import { walk, formatBytes, formatDuration } from './core/util.js';
 import { runMcpServer, renderEvidenceText, TOOLS } from './mcp/server.js';
+import { selfCommand } from './core/runtime.js';
 import { startConsole } from './web/server.js';
 import type { Evidence } from './core/evidence.js';
 
@@ -439,8 +440,9 @@ async function serve(flags: Flags): Promise<number> {
 /** Register the MCP server with a local agent. Entirely offline. */
 async function setup(flags: Flags): Promise<number> {
   const agent = (flags.positional[0] ?? 'claude').toLowerCase();
-  const executable = process.argv[1] ? resolve(process.argv[1]) : 'raqib';
-  const command = basename(executable) === 'raqib.mjs' ? `node ${executable} mcp` : `${executable} mcp`;
+  // How this copy of Raqib is started again: the script and the node that
+  // runs it, or — inside the executable — the executable itself.
+  const self = selfCommand();
   const home = homedir();
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
   const results: Array<{ file: string; action: string }> = [];
@@ -466,19 +468,19 @@ async function setup(flags: Flags): Promise<number> {
     case 'claude':
       await writeJson(join(home, '.claude.json'), (data) => {
         data.mcpServers = data.mcpServers ?? {};
-        data.mcpServers.raqib = { command: 'node', args: [executable, 'mcp'] };
+        data.mcpServers.raqib = { command: self.command, args: self.args };
       });
       break;
     case 'cursor':
       await writeJson(join(home, '.cursor', 'mcp.json'), (data) => {
         data.mcpServers = data.mcpServers ?? {};
-        data.mcpServers.raqib = { command: 'node', args: [executable, 'mcp'] };
+        data.mcpServers.raqib = { command: self.command, args: self.args };
       });
       break;
     case 'gemini':
       await writeJson(join(home, '.gemini', 'settings.json'), (data) => {
         data.mcpServers = data.mcpServers ?? {};
-        data.mcpServers.raqib = { command: 'node', args: [executable, 'mcp'] };
+        data.mcpServers.raqib = { command: self.command, args: self.args };
       });
       break;
     case 'codex': {
@@ -486,7 +488,8 @@ async function setup(flags: Flags): Promise<number> {
       let content = existsSync(file) ? await readFile(file, 'utf8') : '';
       if (!content.includes('[mcp_servers.raqib]')) {
         if (content.length && !content.endsWith('\n')) content += '\n';
-        content += `\n[mcp_servers.raqib]\ncommand = "${command}"\n`;
+        const args = self.args.map((a) => `"${a}"`).join(', ');
+        content += `\n[mcp_servers.raqib]\ncommand = "${self.command}"\nargs = [${args}]\n`;
         await mkdir(dirname(file), { recursive: true });
         await writeFile(file, content, 'utf8');
         results.push({ file, action: 'updated' });
@@ -506,7 +509,7 @@ async function setup(flags: Flags): Promise<number> {
     '',
     'Restart the agent to pick up the change. Nothing was downloaded: the registration is local.',
   ].join('\n');
-  emit(flags, { agent, command, results }, human);
+  emit(flags, { agent, command: self.command, args: self.args, results }, human);
   return 0;
 }
 

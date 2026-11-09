@@ -24,7 +24,7 @@ import { createHash } from 'node:crypto';
 import {
   chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync,
 } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { commonOptions, root } from './esbuild-plugins.mjs';
 
@@ -112,7 +112,11 @@ function baseRuntime() {
 
 function makeBlob(bundle) {
   const config = {
-    main: bundle,
+    // The path of the main script is written into the blob, so an absolute
+    // path would make every machine build a different executable. A relative
+    // name keeps the blob the same everywhere: the executable that comes
+    // out is byte for byte the same on a laptop and on a build machine.
+    main: basename(bundle),
     output: join(SEA_DIR, 'sea-prep.blob'),
     disableExperimentalSEAWarning: true,
     useSnapshot: false,
@@ -124,7 +128,12 @@ function makeBlob(bundle) {
   const configPath = join(SEA_DIR, 'sea-config.json');
   writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf8');
 
-  execFileSync(process.execPath, ['--experimental-sea-config', configPath], { stdio: 'inherit' });
+  // The relative name is read from the working directory, so the working
+  // directory is the folder the bundle lives in.
+  execFileSync(process.execPath, ['--experimental-sea-config', configPath], {
+    cwd: SEA_DIR,
+    stdio: 'inherit',
+  });
   return config.output;
 }
 
