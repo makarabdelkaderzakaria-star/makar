@@ -91,6 +91,19 @@ an explicit list of what could **not** be proven. The interface, the three
 typefaces and the server are all inside the binary — it never fetches an
 asset, which is why it works on a machine with no network.
 
+## Publish your own copy
+
+Raqib is meant to be forked. One command turns this tree into a standalone
+repository under a new name, with its own history:
+
+```bash
+./scripts/publish-repo.sh my-raqib          # or: my-raqib private
+```
+
+It stages a clean copy (no `node_modules`, no `dist`), commits it, creates
+`<your-account>/my-raqib` and pushes. You need the GitHub CLI with permission
+to create repositories; nothing else is contacted.
+
 ## The Brave / Chromium workflow
 
 The flagship case this was built for: understanding what a Chromium fork
