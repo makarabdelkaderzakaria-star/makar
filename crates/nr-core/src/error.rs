@@ -53,6 +53,8 @@ pub enum ConfigError {
     BurstTooSmall { burst: u64 },
     /// Byte budget below a single MTU.
     BudgetTooSmall { bytes: u64 },
+    /// A data cap of zero bytes would drop everything forever.
+    ZeroCap,
     /// Name of the limit is empty.
     EmptyName,
     /// Unknown `key=value` on the command line / config file.
@@ -66,6 +68,7 @@ impl fmt::Display for ConfigError {
         match self {
             Self::ZeroRate => f.write_str("rate must be > 0"),
             Self::BurstTooSmall { burst } => write!(f, "burst {burst} is below one MTU"),
+            Self::ZeroCap => f.write_str("cap must be > 0 bytes"),
             Self::BudgetTooSmall { bytes } => write!(f, "budget {bytes} is below one MTU"),
             Self::EmptyName => f.write_str("limit name must not be empty"),
             Self::UnknownParam(k) => write!(f, "unknown parameter `{k}`"),

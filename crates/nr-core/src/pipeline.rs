@@ -20,7 +20,8 @@
 //! longer than `max_retain_ms` (default 250 ms), which is below the smallest
 //! plausible TCP RTO. So nothing we retain is ever retransmitted on our account.
 
-use crate::config::{Config, LimitScope, Limits, OverLimitPolicy};
+use crate::calendar::Calendar;
+use crate::config::{CapPeriod, Config, LimitScope, Limits, OverLimitPolicy};
 use crate::flow::{FlowKey, FlowTable};
 use crate::gcra::Gcra;
 use crate::identity::{IdentityCache, Lookup, ProcKey, Resolver};
@@ -57,6 +58,8 @@ pub enum DropReason {
     Budget,
     /// Per-flow retention quota reached.
     FlowQuota,
+    /// The limit's daily/monthly byte budget is spent.
+    Cap,
     /// Unparseable / unsupported frame.
     Malformed,
 }
@@ -71,6 +74,7 @@ impl DropReason {
             Self::TooLate => "too_late",
             Self::Budget => "budget",
             Self::FlowQuota => "flow_quota",
+            Self::Cap => "cap",
             Self::Malformed => "malformed",
         }
     }
@@ -87,6 +91,37 @@ pub struct Outcome {
     pub limit: Option<u16>,
 }
 
+/// Runtime state of one limit's byte budget.
+///
+/// `bytes == 0` means the limit has no cap, which keeps this vector aligned with
+/// the limit vector (so a rule's limit index is all the lookup needs).
+#[derive(Debug, Clone, Copy, Default)]
+struct CapState {
+    /// Budget in bytes; `0` == no cap.
+    bytes: u64,
+    /// Reset period.
+    period: CapPeriod,
+    /// Bytes charged in the current period.
+    used: u64,
+    /// The period this count belongs to (UTC day or month index).
+    stamp: u32,
+}
+
+/// Usage of one capped limit, for `lint`, the TUI and the on-disk counter file.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CapUsage {
+    /// Limit name.
+    pub name: String,
+    /// Bytes charged in the current period.
+    pub used: u64,
+    /// Budget in bytes.
+    pub cap: u64,
+    /// Reset period.
+    pub period: CapPeriod,
+    /// Period stamp this usage applies to.
+    pub stamp: u32,
+}
+
 /// The engine: owns the tables, decides everything, touches no I/O.
 pub struct Engine<const FLOWS: usize = 8192> {
     config: Config,
@@ -96,6 +131,8 @@ pub struct Engine<const FLOWS: usize = 8192> {
     gcra: Vec<Gcra>,
     policy: Vec<OverLimitPolicy>,
     scope: Vec<LimitScope>,
+    caps: Vec<CapState>,
+    calendar: Calendar,
     name_ids: Vec<u32>,
     scheduler: Scheduler<u64>,
     stats: Counters,
@@ -116,6 +153,8 @@ impl<const FLOWS: usize> Engine<FLOWS> {
             gcra: Vec::new(),
             policy: Vec::new(),
             scope: Vec::new(),
+            caps: Vec::new(),
+            calendar: Calendar::default(),
             name_ids: Vec::new(),
             scheduler,
             stats: Counters::default(),
@@ -131,7 +170,9 @@ impl<const FLOWS: usize> Engine<FLOWS> {
         let mut gcra = Vec::with_capacity(self.config.limits.len());
         let mut policy = Vec::with_capacity(self.config.limits.len());
         let mut scope = Vec::with_capacity(self.config.limits.len());
+        let mut caps = Vec::with_capacity(self.config.limits.len());
         for l in &self.config.limits {
+            caps.push(self.cap_state_for(l));
             let burst = l.burst_bytes.max(4 * u64::from(crate::config::MTU_BYTES));
             match Gcra::new(l.rate_bps, burst) {
                 Ok(g) => {
@@ -151,10 +192,28 @@ impl<const FLOWS: usize> Engine<FLOWS> {
         self.gcra = gcra;
         self.policy = policy;
         self.scope = scope;
+        self.caps = caps;
         // Per-flow state lives in the flow rows; a reload changes the *rate*
         // those rows are interpreted with, so their timestamps must be dropped
         // (attribution itself stays, so nothing re-walks the rule table).
         self.flows.clear_rate_state();
+    }
+
+    /// Initial runtime state for one limit's cap, stamped with the current
+    /// period so a counter charged later in the same period is not reset.
+    fn cap_state_for(&self, limit: &Limits) -> CapState {
+        let Some(cap) = limit.cap else {
+            return CapState::default();
+        };
+        if cap.bytes == 0 {
+            return CapState::default();
+        }
+        CapState {
+            bytes: cap.bytes,
+            period: cap.period,
+            used: 0,
+            stamp: self.calendar.stamp(cap.period),
+        }
     }
 
     /// Install a compiled rule table.
@@ -454,6 +513,19 @@ impl<const FLOWS: usize> Engine<FLOWS> {
             .unwrap_or(OverLimitPolicy::Shape);
         let len = pkt.accounted_len();
 
+        // A cap is checked before the rate: a spent budget is not a speed
+        // problem, and no amount of shaping makes it fit. Bytes are charged on
+        // admission, so a packet that the retention buffer later sheds still
+        // counts — overcounting is the safe direction to be wrong in.
+        if self.charge_cap(li, len).is_some() {
+            self.stats.dropped_cap += 1;
+            return Outcome {
+                decision: Decision::Drop(DropReason::Cap),
+                flow: Some(*key),
+                limit: Some(limit_idx),
+            };
+        }
+
         let (conforms, wait) = match self.scope.get(li).copied().unwrap_or_default() {
             // One bucket for the whole process: the shared lane.
             LimitScope::Process => self.acquire_shared(li, len, now_ns),
@@ -606,6 +678,97 @@ impl<const FLOWS: usize> Engine<FLOWS> {
         let wait = lane.check(now_ns).unwrap_or(u64::MAX);
         entry.state = lane.tat();
         Some((conforms, wait))
+    }
+
+    /// Tell the engine what day and month it is, in UTC.
+    ///
+    /// The driver loop calls this from its once-a-second tick with the real
+    /// clock; the simulator calls it once. Cheap and idempotent, and it is what
+    /// rolls a spent daily or monthly budget over. Until it is called the
+    /// engine assumes day 0, so a cap behaves as "per process run".
+    pub fn set_calendar(&mut self, calendar: Calendar) {
+        self.calendar = calendar;
+        for li in 0..self.caps.len() {
+            let cap = &mut self.caps[li];
+            if cap.bytes > 0 && !calendar.covers(cap.period, cap.stamp) {
+                cap.used = 0;
+                cap.stamp = calendar.stamp(cap.period);
+            }
+        }
+    }
+
+    /// Calendar position the engine currently believes it is at.
+    #[must_use]
+    pub const fn calendar(&self) -> Calendar {
+        self.calendar
+    }
+
+    /// Charge `len` bytes against a limit's cap.
+    ///
+    /// `Some(DropReason::Cap)` means the budget is spent and the packet must be
+    /// dropped; `None` means it fit (and has been charged).
+    fn charge_cap(&mut self, li: usize, len: u32) -> Option<DropReason> {
+        let calendar = self.calendar;
+        let cap = self.caps.get_mut(li)?;
+        if cap.bytes == 0 {
+            return None;
+        }
+        if !calendar.covers(cap.period, cap.stamp) {
+            cap.used = 0;
+            cap.stamp = calendar.stamp(cap.period);
+        }
+        let len = u64::from(len);
+        if cap.used.saturating_add(len) > cap.bytes {
+            return Some(DropReason::Cap);
+        }
+        cap.used += len;
+        None
+    }
+
+    /// Usage of every limit that has a cap, for `lint`, the status display and
+    /// the counter file. Allocates; never called from the packet path.
+    #[must_use]
+    pub fn cap_usage(&self) -> Vec<CapUsage> {
+        self.config
+            .limits
+            .iter()
+            .zip(self.caps.iter())
+            .filter(|(_, c)| c.bytes > 0)
+            .map(|(l, c)| CapUsage {
+                name: l.name.clone(),
+                used: c.used,
+                cap: c.bytes,
+                period: c.period,
+                stamp: c.stamp,
+            })
+            .collect()
+    }
+
+    /// Restore a counter read from disk.
+    ///
+    /// A stamp from another period is ignored: the budget has already reset, so
+    /// carrying the old count over would charge the user twice for yesterday.
+    /// Returns whether anything was actually restored, so the caller's log line
+    /// can be trusted.
+    pub fn restore_cap_usage(&mut self, name: &str, used: u64, stamp: u32) -> bool {
+        let calendar = self.calendar;
+        let Some(li) = self
+            .config
+            .limits
+            .iter()
+            .position(|l| l.name.eq_ignore_ascii_case(name))
+        else {
+            return false;
+        };
+        let Some(cap) = self.caps.get_mut(li) else {
+            return false;
+        };
+        if cap.bytes == 0 || !calendar.covers(cap.period, stamp) {
+            return false;
+        }
+        cap.used = used.min(cap.bytes);
+        cap.stamp = stamp;
+        true
     }
 
     /// Charge the shared per-process lane and report `(conforms, wait_ns)`.
@@ -1080,5 +1243,112 @@ mod tests {
         assert_eq!(b_after, b_before, "emitting flow A must not charge flow B");
         let b_now = e.process(&b, Direction::Outbound, 0, u32::MAX, 21, due, due / MS);
         assert!(b_now.is_send_now(), "flow B inherited flow A's charge");
+    }
+
+    // -----------------------------------------------------------------------
+    // data caps
+    // -----------------------------------------------------------------------
+
+    /// Engine with one fast limit (so the rate never interferes) that carries a
+    /// byte budget, attached to outbound TCP 443.
+    ///
+    /// The limit is parsed from the user-facing syntax rather than built by
+    /// hand, so the spelling of `cap` is covered by these tests as well.
+    fn cap_engine(spec: &str) -> Engine<1024> {
+        let text = format!("limit budget = 64mbit {spec}\n");
+        let (cfg, _) = Config::parse(&text).unwrap();
+        let mut e = Engine::new(cfg);
+        let rules = vec!["limit=budget : tcp dport 443".to_owned()];
+        let (_, compiled) = Engine::<1024>::compile_rules(&rules, &e.config.limits).unwrap();
+        e.set_rules(compiled);
+        e
+    }
+
+    fn decision_of(e: &mut Engine<1024>, frame: &[u8], token: u64) -> Decision {
+        let out = e.process(frame, Direction::Outbound, 0, u32::MAX, token, 0, 0);
+        out.decision
+    }
+
+    #[test]
+    fn cap_drops_once_the_budget_is_spent() {
+        // 3000 bytes of budget, 1500-byte frames: two fit, the third does not.
+        let mut e = cap_engine("cap 3000/day");
+        let f = conn(51515);
+        assert_eq!(decision_of(&mut e, &f, 0), Decision::SendNow);
+        assert_eq!(decision_of(&mut e, &f, 1), Decision::SendNow);
+        assert_eq!(
+            decision_of(&mut e, &f, 2),
+            Decision::Drop(DropReason::Cap),
+            "the third frame must be refused: the budget is spent"
+        );
+        assert_eq!(e.snapshot().dropped_cap, 1);
+        assert_eq!(e.snapshot().dropped_total(), 1);
+        assert_eq!(e.cap_usage()[0].used, 3000, "usage must stop at the budget");
+    }
+
+    #[test]
+    fn a_daily_cap_rolls_over_at_the_next_day() {
+        let mut e = cap_engine("cap 3000/day");
+        let f = conn(51515);
+        for token in 0..2 {
+            assert_eq!(decision_of(&mut e, &f, token), Decision::SendNow);
+        }
+        assert_eq!(decision_of(&mut e, &f, 2), Decision::Drop(DropReason::Cap));
+
+        // Midnight UTC: the same flow gets a fresh budget.
+        e.set_calendar(Calendar::from_day_index(7));
+        assert_eq!(e.cap_usage()[0].used, 0);
+        assert_eq!(decision_of(&mut e, &f, 3), Decision::SendNow);
+    }
+
+    #[test]
+    fn a_monthly_cap_survives_the_next_day() {
+        let mut e = cap_engine("cap 3000/month");
+        let f = conn(51515);
+        for token in 0..2 {
+            assert_eq!(decision_of(&mut e, &f, token), Decision::SendNow);
+        }
+        // The next day is in the same month (day 0 and day 1 are January 1970),
+        // so the budget stays spent.
+        e.set_calendar(Calendar::from_day_index(1));
+        assert_eq!(decision_of(&mut e, &f, 2), Decision::Drop(DropReason::Cap));
+        // The first of February is a new period.
+        e.set_calendar(Calendar::from_day_index(31));
+        assert_eq!(e.cap_usage()[0].used, 0);
+        assert_eq!(decision_of(&mut e, &f, 3), Decision::SendNow);
+    }
+
+    #[test]
+    fn restored_usage_only_applies_to_the_period_it_was_recorded_in() {
+        let f = conn(51515);
+        let mut e = cap_engine("cap 10000/day");
+        e.set_calendar(Calendar::from_day_index(20_766));
+
+        // A counter from yesterday must not be charged to today.
+        e.restore_cap_usage("budget", 9_000, 20_765);
+        assert_eq!(e.cap_usage()[0].used, 0);
+
+        // One from today is, and it is enforced: 1000 bytes are left, which is
+        // less than one 1500-byte frame, so the next packet is refused.
+        e.restore_cap_usage("budget", 9_000, 20_766);
+        assert_eq!(e.cap_usage()[0].used, 9_000);
+        assert_eq!(decision_of(&mut e, &f, 0), Decision::Drop(DropReason::Cap));
+
+        // A name that is not configured is ignored rather than invented.
+        e.restore_cap_usage("not-a-limit", 500, 20_766);
+    }
+
+    #[test]
+    fn an_uncapped_limit_never_drops_for_its_cap() {
+        let mut e = engine_with(vec![Limits::new("tight").bits(8_000_000)]);
+        let f = conn(51515);
+        for token in 0..5 {
+            assert_ne!(
+                decision_of(&mut e, &f, token),
+                Decision::Drop(DropReason::Cap)
+            );
+        }
+        assert_eq!(e.snapshot().dropped_cap, 0);
+        assert!(e.cap_usage().is_empty());
     }
 }

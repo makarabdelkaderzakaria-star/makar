@@ -39,6 +39,7 @@
 #![forbid(unsafe_code)]
 
 pub mod attribution;
+pub mod calendar;
 pub mod config;
 pub mod error;
 pub mod flow;
@@ -52,13 +53,14 @@ pub mod scheduler;
 pub mod stats;
 
 pub use attribution::{FlowAttribution, FlowEvent, SeedReport, SnapshotEntry};
-pub use config::{Config, LimitScope, Limits, OverLimitPolicy};
+pub use calendar::Calendar;
+pub use config::{Cap, CapPeriod, Config, LimitScope, Limits, OverLimitPolicy};
 pub use error::{ConfigError, ParseError, RuleError};
 pub use flow::{Endpoint, FlowKey, FlowTable};
 pub use gcra::Gcra;
 pub use identity::{IdentityCache, ProcIdentity, ProcKey};
 pub use packet::{Direction, PacketView, Protocol, TcpFlags};
-pub use pipeline::{Decision, DropReason, Engine, Outcome};
+pub use pipeline::{CapUsage, Decision, DropReason, Engine, Outcome};
 pub use rules::{Action, CompiledRules, RuleSet};
 pub use scheduler::{Admit, Scheduler, Shed};
 pub use stats::{Counters, Snapshot};

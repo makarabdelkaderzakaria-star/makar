@@ -4,6 +4,19 @@
 
 ### Added
 
+* **Data caps: a byte budget per day or month.** `limit phone.exe = 4mbit cap
+  20gb/month` (or `cap 2gb/day`) drops matching traffic once the budget is
+  spent, which is what a metered connection needs far more than a rate limit.
+  Bytes are charged on admission in both directions, so a packet the retention
+  buffer sheds still counts. Periods roll over at 00:00 **UTC** — deliberately
+  not local time, which would need a timezone database. The counter is
+  persisted in `<config>.caps` with the period stamp it belongs to, so a
+  restart (or a counter file from yesterday) cannot refund a spent budget; a
+  crash costs at most the last minute of accounting. New drop reason `cap`,
+  counted in `simulate`, the daemon status line and the TUI. `nr-core::calendar`
+  decodes UTC day/month from the Unix clock with no date dependency, tested
+  against independently computed dates including a leap day and 2100 (not a
+  leap year).
 * **`per-flow` limit scope.** `limit browser.exe = 8mbit per-flow` (or
   `scope flow`) gives every connection its own GCRA lane instead of pooling the
   process's flows into one bucket, so one saturated transfer no longer starves
