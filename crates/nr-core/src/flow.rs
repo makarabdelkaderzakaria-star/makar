@@ -241,10 +241,8 @@ impl<const CAP: usize> FlowTable<CAP> {
     /// carry attribution), but their GCRA timestamps were produced under the
     /// old rates and would otherwise hand out a free burst.
     pub fn clear_rate_state(&mut self) {
-        for slot in &mut self.slots {
-            if let Some((_, entry)) = slot {
-                entry.state = 0;
-            }
+        for (_, entry) in self.slots.iter_mut().flatten() {
+            entry.state = 0;
         }
     }
 
