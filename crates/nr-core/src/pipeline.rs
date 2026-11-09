@@ -1505,7 +1505,7 @@ mod tests {
     }
 
     #[test]
-    fn an_ecn_limit_marks_instead_of_delaying() {
+    fn an_ecn_limit_marks_the_packet_that_goes_over() {
         let mut e = spec_engine("burst 1500 policy ecn");
         let f = conn_ecn(51515, ecn::codepoint::ECT0);
         assert!(ecn::is_ecn_capable(&f), "the fixture must be ECN-capable");
@@ -1515,18 +1515,36 @@ mod tests {
         assert_eq!(decision_of(&mut e, &f, 0), Decision::SendNow);
         assert_eq!(decision_of(&mut e, &f, 1), Decision::SendNow);
         assert_eq!(decision_of(&mut e, &f, 2), Decision::MarkEcn);
+    }
+
+    #[test]
+    fn an_ecn_mark_is_counted_and_retains_nothing() {
+        let mut e = spec_engine("burst 1500 policy ecn");
+        let f = conn_ecn(51515, ecn::codepoint::ECT0);
+        decision_of(&mut e, &f, 0);
+        decision_of(&mut e, &f, 1);
+        let out = decision_of(&mut e, &f, 2);
+        assert_eq!(out, Decision::MarkEcn);
         assert_eq!(e.snapshot().marked_ecn, 1);
         assert_eq!(e.snapshot().retained, 0, "marking must not retain");
+    }
+
+    #[test]
+    fn an_ecn_limit_shapes_a_packet_that_cannot_carry_the_signal() {
+        let mut e = spec_engine("burst 1500 policy ecn");
+        let f = conn_ecn(51515, ecn::codepoint::ECT0);
+        decision_of(&mut e, &f, 0);
+        decision_of(&mut e, &f, 1);
 
         // A Not-ECT packet has no way to carry the signal, so `ecn` falls back
         // to shaping instead of dropping or corrupting it.
         let plain = conn(51516);
         assert!(!ecn::is_ecn_capable(&plain));
-        let out = decision_of(&mut e, &plain, 3);
+        let out = decision_of(&mut e, &plain, 2);
         assert!(
             matches!(out, Decision::Retain { .. }),
             "a Not-ECT packet must be shaped, got {out:?}"
         );
-        assert_eq!(e.snapshot().marked_ecn, 1, "and it must not be counted");
+        assert_eq!(e.snapshot().marked_ecn, 0, "and it must not be counted");
     }
 }

@@ -77,8 +77,11 @@ pub fn ecn_codepoint(frame: &[u8]) -> Option<u8> {
             if frame.len() < 40 {
                 return None;
             }
-            // Traffic class spans bits 4..12; the ECN bits are its low two, which
-            // is exactly the top two bits of the second byte.
+            // The traffic class is eight bits split across the two header
+            // bytes: its high nibble is the low nibble of byte 0 and its low
+            // nibble is the high nibble of byte 1. The codepoint is the *low*
+            // two bits of the class, so it is bits 5..4 of byte 1 — not the top
+            // two, which are the low bits of the DSCP.
             Some((frame[1] >> 4) & 0b11)
         }
         _ => None,
@@ -111,9 +114,9 @@ pub fn mark_ce(frame: &mut [u8]) -> Mark {
             if frame[0] >> 4 == 4 {
                 mark_ipv4_ce(frame);
             } else {
-                // IPv6: the traffic class spans bytes 0 and 1, and its low two
-                // bits (the codepoint) are the top two bits of byte 1.
-                frame[1] |= 0b1100_0000;
+                // IPv6: no checksum to repair, but the codepoint is bits 5..4
+                // of byte 1 (see `ecn_codepoint`), not the top two bits.
+                frame[1] |= 0b0011_0000;
             }
             Mark::Marked
         }
@@ -144,7 +147,14 @@ fn mark_ipv4_ce(frame: &mut [u8]) {
     let m = (u16::from(frame[0]) << 8) | u16::from(old_tos);
     let m_prime = (u16::from(frame[0]) << 8) | u16::from(new_tos);
     let hc = (u16::from(frame[10]) << 8) | u16::from(frame[11]);
-    let fixed = !((!hc).wrapping_add(!m).wrapping_add(m_prime));
+    // The three terms are added in one's complement, where a carry out of bit
+    // 15 has to wrap back into bit 0; `wrapping_add` on `u16` drops it, so the
+    // sum is accumulated in `u32` and folded until it fits.
+    let mut sum = u32::from(!hc) + u32::from(!m) + u32::from(m_prime);
+    while sum >> 16 != 0 {
+        sum = (sum & 0xFFFF) + (sum >> 16);
+    }
+    let fixed = !(sum as u16);
     frame[10] = (fixed >> 8) as u8;
     frame[11] = fixed as u8;
 }
@@ -263,11 +273,15 @@ mod tests {
     fn marks_ipv6_where_there_is_no_checksum_to_fix() {
         let mut f = ipv6(codepoint::ECT0);
         assert!(is_ecn_capable(&f));
+        let dscp = f[1] & 0b1100_0000;
         assert_eq!(mark_ce(&mut f), Mark::Marked);
         assert_eq!(ecn_codepoint(&f), Some(codepoint::CE));
-        // The DSCP part of the traffic class must survive.
-        assert_eq!(f[0] & 0x0F, 0x05, "the high nibble of the class is DSCP");
-        assert_eq!((f[1] >> 4) & 0b1100, 0b0100, "the DSCP low bits are intact");
+        // Only the codepoint's two bits may move: byte 0 carries the top half
+        // of the class, byte 1's top two bits carry the low bits of the DSCP,
+        // and byte 1's low nibble is the flow label.
+        assert_eq!(f[0], 0x65, "the top half of the class is untouched");
+        assert_eq!(f[1] & 0b1100_0000, dscp, "the DSCP low bits are intact");
+        assert_eq!(f[1] & 0x0F, 0, "the flow label is untouched");
     }
 
     #[test]

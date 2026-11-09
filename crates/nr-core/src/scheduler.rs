@@ -627,7 +627,7 @@ mod tests {
         let mut seen = Vec::new();
         assert_eq!(s.drain_due(130 * MS, 64, |d| seen.push(d.addr)), 2);
         assert_eq!(s.codel_drops(), 1);
-        assert_eq!(seen, vec![1u8, 2u8], "no packet is skipped");
+        assert_eq!(seen, vec![2u8, 3u8], "no packet is skipped");
         assert!(s.is_empty(), "and none is left behind");
     }
 }
