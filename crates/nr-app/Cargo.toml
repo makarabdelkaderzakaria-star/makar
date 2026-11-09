@@ -1,0 +1,15 @@
+[package]
+name = "nr-app"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "NetRocket CLI, daemon runner and TUI."
+
+[[bin]]
+name = "netrocket"
+path = "src/main.rs"
+
+[dependencies]
+nr-core = { path = "../nr-core" }
+nr-divert = { path = "../nr-divert" }

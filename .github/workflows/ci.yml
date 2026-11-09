@@ -1,0 +1,52 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  # The Windows backend is cfg(windows) code developed on Linux. Type-check it
+  # from a Linux runner so it can never silently rot again -- the first draft of
+  # crates/nr-divert/src/win.rs did not even compile.
+  windows-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+          components: clippy
+      - name: clippy (windows target, all targets)
+        run: cargo clippy --target x86_64-pc-windows-msvc --all-targets -- -D warnings
+      - name: check (windows target)
+        run: cargo check --target x86_64-pc-windows-msvc --all-targets
+
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: fmt
+        run: cargo fmt --all -- --check
+      - name: clippy
+        run: cargo clippy --all-targets -- -D warnings
+      - name: test
+        run: cargo test --all
+      - name: test (windows target: pure types + policy checks)
+        if: matrix.os == 'windows-latest'
+        run: cargo test --all
+      - name: build release
+        run: cargo build --release
+      - name: smoke
+        run: |
+          ./target/release/netrocket version
+          ./target/release/netrocket init
+          ./target/release/netrocket check
+          ./target/release/netrocket simulate --frames=500
+        shell: bash

@@ -1,0 +1,18 @@
+[package]
+name = "nr-divert"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "NetRocket I/O layer: WinDivert backend (Windows) plus a cross-platform simulator/test transport."
+
+[dependencies]
+nr-core = { path = "../nr-core" }
+
+[target.'cfg(windows)'.dependencies]
+
+[features]
+default = []
+# Open the divert handle with WINDIVERT_FLAG_NO_INSTALL (driver must already be
+# installed); useful for locked-down machines and for CI.
+no-install = []

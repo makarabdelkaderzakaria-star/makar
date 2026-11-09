@@ -1,0 +1,45 @@
+NetRocket
+=========
+
+This project is a ground-up reimplementation of the ideas in:
+
+  OpenNetLimit — https://github.com/SysAdminDoc/OpenNetLimit
+  Copyright (c) the OpenNetLimit contributors
+  Licence: MIT
+  Analysed at commit f26b46cc93887fab6bbeed2091b5d365fa516e2b
+
+No source code from OpenNetLimit is included. The analysis that informed the
+design, including the file:line evidence for every behavioural difference, is
+in docs/REVERSE-ENGINEERING.md.
+
+The reverse-engineering methodology (evidence tagging, provenance, fail-closed
+unknowns) comes from:
+
+  REA — https://github.com/morluto/rea
+  Licence: see the upstream repository
+
+-------------------------------------------------------------------------------
+WinDivert (NOT bundled)
+-------------------------------------------------------------------------------
+
+NetRocket links dynamically against WinDivert 2.2:
+
+  WinDivert — https://github.com/basil00/WinDivert
+  Copyright (c) Basil (basil00)
+  Licence: dual LGPLv3 / GPLv2
+
+No WinDivert source or binary is distributed in this repository. If you ship
+the driver (WinDivert.dll, WinDivert64.sys) alongside these binaries you must:
+
+  * include WinDivert's licence text,
+  * state that the driver is a separate, replaceable component (LGPL relinking),
+  * leave the driver files unmodified.
+
+See docs/SECURITY.md, "WinDivert licensing and distribution".
+
+-------------------------------------------------------------------------------
+Rust
+-------------------------------------------------------------------------------
+
+This workspace has no third-party crate dependencies. Everything in
+Cargo.toml is a path dependency of this repository.

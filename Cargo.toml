@@ -1,0 +1,21 @@
+[workspace]
+resolver = "2"
+members = ["crates/nr-core", "crates/nr-divert", "crates/nr-app"]
+
+[workspace.package]
+version = "0.2.0"
+edition = "2021"
+rust-version = "1.75"
+license = "MIT"
+repository = "https://github.com/makarabdelkaderzakaria-star/makar"
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = "symbols"
+
+[profile.bench]
+opt-level = 3
+lto = "thin"

@@ -1,0 +1,9 @@
+/target
+**/*.rs.bk
+netrocket.conf
+*.tmp
+
+# secrets: never commit a key. .env.example documents the shape only.
+.env
+.env.*
+!.env.example
