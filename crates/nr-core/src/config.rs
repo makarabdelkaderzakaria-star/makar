@@ -892,8 +892,9 @@ rule limit=chrome.exe : tcp
         assert_eq!(cfg.codel_target_ms, 5);
         assert_eq!(cfg.codel_interval_ms, 100, "the RFC default interval");
 
-        let (cfg, _) = Config::parse("param codel = 5ms\nparam codel-interval = 200ms\n");
-        assert_eq!(cfg.unwrap().codel_interval_ms, 200);
+        let text = "param codel = 5ms\nparam codel-interval = 200ms\n";
+        let (cfg, _) = Config::parse(text).unwrap();
+        assert_eq!(cfg.codel_interval_ms, 200);
 
         // An interval of zero would make CoDel drop every packet it sees.
         assert!(Config::parse("param codel-interval = 0\n").is_err());

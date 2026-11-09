@@ -144,9 +144,7 @@ fn mark_ipv4_ce(frame: &mut [u8]) {
     let m = (u16::from(frame[0]) << 8) | u16::from(old_tos);
     let m_prime = (u16::from(frame[0]) << 8) | u16::from(new_tos);
     let hc = (u16::from(frame[10]) << 8) | u16::from(frame[11]);
-    let fixed = !((!hc)
-        .wrapping_add(!m)
-        .wrapping_add(m_prime));
+    let fixed = !((!hc).wrapping_add(!m).wrapping_add(m_prime));
     frame[10] = (fixed >> 8) as u8;
     frame[11] = fixed as u8;
 }
