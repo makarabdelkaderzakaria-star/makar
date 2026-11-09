@@ -20,8 +20,8 @@ status=${PIPESTATUS[0]}
 if [ "$status" -ne 0 ]; then
   # One annotation per matching line, capped: annotations are a pointer to the
   # first thing that went wrong, not a replacement for the log.
-  grep -nE '^(error(\[[A-Za-z0-9]+\])?:|Diff in|test .* FAILED|failures:|--- |thread .* panicked|note: (the )?match)' \
-    "$log" | head -25 | while IFS= read -r line; do
+  grep -nE '^(error(\[[A-Za-z0-9]+\])?:|Diff in|test .* FAILED|failures:|--- |thread .* panicked|note:|-|\+)|^ *(--?>|\||[0-9]+ \|)' \
+    "$log" | head -40 | while IFS= read -r line; do
     printf '::error title=%s::%s\n' "$name" "$line"
   done
 fi

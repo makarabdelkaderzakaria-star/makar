@@ -17,6 +17,9 @@ jobs:
   # crates/nr-divert/src/win.rs did not even compile.
   windows-check:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -24,9 +27,9 @@ jobs:
           targets: x86_64-pc-windows-msvc
           components: clippy
       - name: clippy (windows target, all targets)
-        run: ./scripts/ci-annotate.sh "clippy/windows" cargo clippy --target x86_64-pc-windows-msvc --all-targets -- -D warnings
+        run: bash scripts/ci-annotate.sh "clippy/windows" cargo clippy --target x86_64-pc-windows-msvc --all-targets -- -D warnings
       - name: check (windows target)
-        run: ./scripts/ci-annotate.sh "check/windows" cargo check --target x86_64-pc-windows-msvc --all-targets
+        run: bash scripts/ci-annotate.sh "check/windows" cargo check --target x86_64-pc-windows-msvc --all-targets
 
   test:
     strategy:
@@ -34,19 +37,22 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
       - name: fmt
-        run: ./scripts/ci-annotate.sh fmt cargo fmt --all -- --check
+        run: bash scripts/ci-annotate.sh fmt cargo fmt --all -- --check
       - name: clippy
-        run: ./scripts/ci-annotate.sh clippy cargo clippy --all-targets -- -D warnings
+        run: bash scripts/ci-annotate.sh clippy cargo clippy --all-targets -- -D warnings
       - name: test
-        run: ./scripts/ci-annotate.sh test cargo test --all
+        run: bash scripts/ci-annotate.sh test cargo test --all
       - name: build release
-        run: ./scripts/ci-annotate.sh build cargo build --release
+        run: bash scripts/ci-annotate.sh build cargo build --release
       - name: smoke
         shell: bash
         run: |
