@@ -328,9 +328,11 @@ pub fn bind(path: &Path) -> io::Result<Listener> {
     }
     let listener = UnixListener::bind(path)?;
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
-    let connections = listener
-        .incoming()
-        .map(|conn| conn.map(|stream| Box::new(stream) as Connection));
+    // `incoming()` borrows the listener, so the iterator owns it instead.
+    let mut sockets = listener;
+    let connections = std::iter::from_fn(move || {
+        Some(sockets.accept().map(|(stream, _)| Box::new(stream) as Connection))
+    });
     Ok(Box::new(connections))
 }
 
@@ -578,8 +580,20 @@ mod win_pipe {
     }
 
     /// One accepted pipe instance, usable as a byte stream.
+    ///
+    /// The handle is kept as a `usize` so this type is plainly `Send`: a Win32
+    /// handle is a process-wide number rather than a pointer into some other
+    /// thread's memory, and this one is created, used and closed by a single
+    /// thread at a time. Storing the raw pointer instead would need an
+    /// `unsafe impl Send` around something that is not actually unsafe.
     struct Pipe {
-        handle: Handle,
+        handle: usize,
+    }
+
+    impl Pipe {
+        fn handle(&self) -> Handle {
+            self.handle as Handle
+        }
     }
 
     impl Read for Pipe {
@@ -590,7 +604,7 @@ mod win_pipe {
             let mut read: Dword = 0;
             let ok = unsafe {
                 ReadFile(
-                    self.handle,
+                    self.handle(),
                     buf.as_mut_ptr(),
                     buf.len().min(Dword::MAX as usize) as Dword,
                     &mut read,
@@ -609,7 +623,7 @@ mod win_pipe {
             let mut written: Dword = 0;
             let ok = unsafe {
                 WriteFile(
-                    self.handle,
+                    self.handle(),
                     buf.as_ptr(),
                     buf.len().min(Dword::MAX as usize) as Dword,
                     &mut written,
@@ -630,8 +644,8 @@ mod win_pipe {
     impl Drop for Pipe {
         fn drop(&mut self) {
             unsafe {
-                let _ = DisconnectNamedPipe(self.handle);
-                let _ = CloseHandle(self.handle);
+                let _ = DisconnectNamedPipe(self.handle());
+                let _ = CloseHandle(self.handle());
             }
         }
     }
@@ -699,7 +713,9 @@ mod win_pipe {
                     return Some(Err(err));
                 }
             }
-            Some(Ok(Box::new(Pipe { handle }) as super::Connection))
+            Some(Ok(Box::new(Pipe {
+                handle: handle as usize,
+            }) as super::Connection))
         }
     }
 
