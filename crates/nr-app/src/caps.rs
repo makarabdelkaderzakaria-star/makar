@@ -230,7 +230,11 @@ mod tests {
 
         let mut e = Engine::<8192>::new(capped_config());
         e.set_calendar(Calendar::from_day_index(20_766));
-        assert_eq!(load_into(&mut e, &path), 0, "nothing in that text is usable");
+        assert_eq!(
+            load_into(&mut e, &path),
+            0,
+            "nothing in that text is usable"
+        );
         assert_eq!(e.cap_usage()[0].used, 0);
         let _ = fs::remove_dir_all(&dir);
     }

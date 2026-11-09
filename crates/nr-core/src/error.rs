@@ -53,6 +53,8 @@ pub enum ConfigError {
     BurstTooSmall { burst: u64 },
     /// Byte budget below a single MTU.
     BudgetTooSmall { bytes: u64 },
+    /// A data cap of zero bytes would drop everything forever.
+    ZeroCap,
     /// Name of the limit is empty.
     EmptyName,
     /// Unknown `key=value` on the command line / config file.

@@ -1343,7 +1343,10 @@ mod tests {
         let mut e = engine_with(vec![Limits::new("tight").bits(8_000_000)]);
         let f = conn(51515);
         for token in 0..5 {
-            assert_ne!(decision_of(&mut e, &f, token), Decision::Drop(DropReason::Cap));
+            assert_ne!(
+                decision_of(&mut e, &f, token),
+                Decision::Drop(DropReason::Cap)
+            );
         }
         assert_eq!(e.snapshot().dropped_cap, 0);
         assert!(e.cap_usage().is_empty());
