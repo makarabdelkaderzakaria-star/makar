@@ -255,16 +255,26 @@ impl<const CAP: usize> FlowTable<CAP> {
     /// and touching the timestamp there would keep a silent flow alive.
     #[inline]
     pub fn get_mut(&mut self, key: &FlowKey) -> Option<&mut FlowEntry> {
+        // Two passes on purpose: returning a borrow from inside the probe loop
+        // needs Polonius, which the current borrow checker does not have. Find
+        // the slot immutably first, then borrow it exactly once.
         let start = Self::hash(key);
+        let mut found = None;
         for i in 0..CAP {
             let idx = (start + i) & (CAP - 1);
-            match &mut self.slots[idx] {
-                None => return None,
-                Some((k, v)) if *k == *key => return Some(v),
+            match &self.slots[idx] {
+                None => break,
+                Some((k, _)) if k == key => {
+                    found = Some(idx);
+                    break;
+                }
                 Some(_) => {}
             }
         }
-        None
+        match &mut self.slots[found?] {
+            Some((_, entry)) => Some(entry),
+            None => None,
+        }
     }
 
     /// Look up or insert. Returns `None` only when the table is full.

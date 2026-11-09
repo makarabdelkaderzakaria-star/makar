@@ -314,7 +314,10 @@ mod tests {
         assert!(out.contains("chrome.exe"));
         assert!(out.contains("first match wins"));
         assert!(out.contains("Mbit/s"));
-        assert!(out.contains("scope per-flow"), "lint must show the scope:\n{out}");
+        assert!(
+            out.contains("scope per-flow"),
+            "lint must show the scope:\n{out}"
+        );
         let _ = fs::remove_dir_all(&dir);
     }
 

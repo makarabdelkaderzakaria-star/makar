@@ -620,8 +620,8 @@ rule limit=chrome.exe : tcp
         for scope in [LimitScope::Process, LimitScope::Flow] {
             assert_eq!(LimitScope::parse(scope.as_str()), Some(scope));
             assert_eq!(LimitScope::parse(scope.as_token()), Some(scope));
-            let (cfg, _) = Config::parse(&format!("limit a.exe = 1mbit {}\n", scope.as_token()))
-                .unwrap();
+            let (cfg, _) =
+                Config::parse(&format!("limit a.exe = 1mbit {}\n", scope.as_token())).unwrap();
             assert_eq!(cfg.limit("a.exe").unwrap().scope, scope);
         }
     }

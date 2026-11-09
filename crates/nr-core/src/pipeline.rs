@@ -720,6 +720,16 @@ mod tests {
     const MS: u64 = 1_000_000;
     const S: u64 = 1_000_000_000;
 
+    /// Emit a retained frame at its due time, charging the flow that owns it.
+    ///
+    /// A helper rather than three inline calls: `on_emitted` takes the flow key
+    /// as well as the frame, which makes the call long enough that rustfmt
+    /// breaks it inside every match arm.
+    fn emit(e: &mut Engine<1024>, frame: &[u8], due_ns: u64) {
+        let key = key_of(frame, Direction::Outbound, 0);
+        e.on_emitted(key, 0, frame.len() as u32, due_ns);
+    }
+
     /// Canonical flow key for a frame, exactly as `process` computes it.
     fn key_of(frame: &[u8], dir: Direction, pid: u32) -> FlowKey {
         let view = PacketView::parse(frame).expect("test frame parses");
@@ -783,7 +793,7 @@ mod tests {
                 Decision::Retain { due_ns } => {
                     retained += 1;
                     // Emit it at its due time and charge the lane.
-                    e.on_emitted(key_of(&f, Direction::Outbound, 0), 0, f.len() as u32, due_ns);
+                    emit(&mut e, &f, due_ns);
                     now = due_ns;
                 }
                 Decision::Drop(_) => panic!("should not drop while shaping"),
@@ -811,7 +821,7 @@ mod tests {
                     decision: Decision::Retain { due_ns },
                     ..
                 } => {
-                    e.on_emitted(key_of(&f, Direction::Outbound, 0), 0, f.len() as u32, due_ns);
+                    emit(&mut e, &f, due_ns);
                     now = due_ns;
                     emitted_bytes += f.len() as u64;
                 }
@@ -925,7 +935,7 @@ mod tests {
                 .process(&f, Direction::Outbound, 0, u32::MAX, 0, now, now / MS)
                 .decision
             {
-                e.on_emitted(key_of(&f, Direction::Outbound, 0), 0, f.len() as u32, due_ns);
+                emit(&mut e, &f, due_ns);
                 now = due_ns;
             }
         }
@@ -975,7 +985,10 @@ mod tests {
             assert_eq!(out.decision, Decision::SendNow, "flow A packet {i} of burst");
         }
         let over = e.process(&a, Direction::Outbound, 0, u32::MAX, 10, 0, 0);
-        assert!(!over.is_send_now(), "flow A must be limited after its burst");
+        assert!(
+            !over.is_send_now(),
+            "flow A must be limited after its burst"
+        );
         let fresh = e.process(&b, Direction::Outbound, 0, u32::MAX, 11, 0, 0);
         assert!(
             fresh.is_send_now(),
@@ -1002,11 +1015,12 @@ mod tests {
         let mut retained = 0;
         let mut now = 0u64;
         for i in 0..30 {
-            match e.process(&a, Direction::Outbound, 0, u32::MAX, i, now, now / MS).decision {
+            let verdict = e.process(&a, Direction::Outbound, 0, u32::MAX, i, now, now / MS);
+            match verdict.decision {
                 Decision::SendNow => {}
                 Decision::Retain { due_ns } => {
                     retained += 1;
-                    e.on_emitted(key_of(&a, Direction::Outbound, 0), 0, a.len() as u32, due_ns);
+                    emit(&mut e, &a, due_ns);
                     now = due_ns;
                 }
                 Decision::Drop(_) => panic!("shape policy must never drop"),
@@ -1027,11 +1041,13 @@ mod tests {
         let a = conn(51515);
         let b = conn(51516);
         // Both flows exist and are conforming at t = 0.
-        assert!(e.process(&b, Direction::Outbound, 0, u32::MAX, 0, 0, 0).is_send_now());
+        let b_first = e.process(&b, Direction::Outbound, 0, u32::MAX, 0, 0, 0);
+        assert!(b_first.is_send_now());
         for i in 0..4 {
             e.process(&a, Direction::Outbound, 0, u32::MAX, i, 0, 0);
         }
-        let due = match e.process(&a, Direction::Outbound, 0, u32::MAX, 20, 0, 0).decision {
+        let verdict = e.process(&a, Direction::Outbound, 0, u32::MAX, 20, 0, 0);
+        let due = match verdict.decision {
             Decision::Retain { due_ns } => due_ns,
             other => panic!("flow A should have been retained, got {other:?}"),
         };
@@ -1042,7 +1058,11 @@ mod tests {
         let a_after = e.flows().get(&key_a).map_or(0, |f| f.state);
         let b_after = e.flows().get(&key_b).map_or(0, |f| f.state);
         assert!(a_after > 0, "emitting must charge flow A");
-        assert_eq!(b_after, b_before, "emitting flow A must not charge flow B");
+        assert_eq!(
+            b_after,
+            b_before,
+            "emitting flow A must not charge flow B"
+        );
         let b_now = e.process(&b, Direction::Outbound, 0, u32::MAX, 21, due, due / MS);
         assert!(b_now.is_send_now(), "flow B inherited flow A's charge");
     }
