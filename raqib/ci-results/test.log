@@ -1,0 +1,61 @@
+
+Raqib - testing the standalone executable
+  executable : D:\a\_temp\clean\Raqib.exe
+  size       : 87417344 bytes
+
+== The machine has no runtime but the executable
+  node on PATH : not found
+  bun  on PATH : not found
+  PASS  no node, no bun
+
+== 1. --help
+  PASS  01. --help lists every command
+  (all 18 commands present in the help text)
+
+== 2. doctor
+  PASS  02. doctor reports the machine
+
+== 3. a real Windows binary (notepad.exe)
+  PASS  03. analyze notepad.exe
+  (notepad reports: # pe — C:\Windows\System32\notepad.exe)
+  PASS  04. the PE report names its imports
+
+== 4. a Chromium-family browser
+  PASS  05. identify the installed browser
+  (browser says: # browser-identity — D:\a\_temp\brave)
+
+== 5. the search engine and its worker threads
+  PASS  06. search a tree of 1500 files
+  (the search used 2 worker thread(s) - the embedded worker started)
+
+== 6. compare two builds
+  PASS  07. compare old-build with new-build
+
+== 7. source maps
+  PASS  08. map a bundle back to its source
+  PASS  09. the map lists the original files
+
+== 8. ASAR archives
+  PASS  10. read an asar archive
+
+== 9. package manifests
+  PASS  11. read a package manifest
+
+== 10. the MCP server over stdio
+  PASS  12. MCP lists all 11 tools
+  PASS  13. MCP answered a tool call
+
+== 11. it runs from anywhere
+  PASS  14. runs from an unrelated working directory
+
+== 12. paths with spaces and Arabic characters
+  PASS  15. search a path with spaces and Arabic characters
+  PASS  16. analyse a file with an Arabic name
+
+== 13. the executable does not need anything beside it
+  the folder holds: Raqib.exe
+  PASS  17. runs with nothing beside it
+
+-----------------------------------------------
+19 of 19 checks passed
+-----------------------------------------------

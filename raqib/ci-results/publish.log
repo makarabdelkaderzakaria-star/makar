@@ -1,0 +1,41 @@
+**********************
+PowerShell transcript start
+Start time: 20261109215224
+Username: runnervmm7ud1\runneradmin
+RunAs User: runnervmm7ud1\runneradmin
+Configuration Name: 
+Machine: runnervmm7ud1 (Microsoft Windows NT 10.0.26100.0)
+Host Application: C:\Program Files\PowerShell\7\pwsh.dll -command . 'D:\a\_temp\9e498f55-9ed5-4c9d-b69a-60097e3e26c1.ps1'
+Process ID: 4128
+PSVersion: 7.6.9
+PSEdition: Core
+GitCommitId: 7.6.9
+OS: Microsoft Windows 10.0.26100
+Platform: Win32NT
+PSCompatibleVersions: 1.0, 2.0, 3.0, 4.0, 5.0, 5.1, 6.0, 7.0
+PSRemotingProtocolVersion: 2.4
+SerializationVersion: 1.1.0.1
+WSManStackVersion: 3.0
+**********************
+raqib: packaged D:\a\makar\makar\raqib\dist\Raqib-0.2.0-windows-x64.zip
+  size  : 32.9 MiB
+  sha256: 57536f0d08db77b8bfefcdd210ac9178b2ff5bea4b697338fa356812d70e1826
+  exe   : 26cee8edf5ef4c0d00b074580872889fa58ff1ffdd25742d5cb2ef32e11a6b06
+reusing release 439654807
+removed the older Raqib.exe
+uploaded Raqib.exe
+removed the older SHA256
+uploaded SHA256
+removed the older SHA256SUMS
+uploaded SHA256SUMS
+removed the older SHA256SUMS.zip
+uploaded SHA256SUMS.zip
+removed the older Raqib-0.2.0-windows-x64.zip
+uploaded Raqib-0.2.0-windows-x64.zip
+removed the older results.json
+uploaded results.json
+published sha256: 26cee8edf5ef4c0d00b074580872889fa58ff1ffdd25742d5cb2ef32e11a6b06
+**********************
+PowerShell transcript end
+End time: 20261109215250
+**********************

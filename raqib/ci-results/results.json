@@ -1,0 +1,145 @@
+{
+  "executable": "D:\\a\\_temp\\clean\\Raqib.exe",
+  "size": 87417344,
+  "passed": 19,
+  "total": 19,
+  "failed": 0,
+  "nodeOnPath": false,
+  "bunOnPath": false,
+  "workerThreadsUsed": 2,
+  "checks": [
+    {
+      "number": 0,
+      "name": "machine has no node or bun",
+      "passed": true,
+      "exitCode": 0,
+      "detail": "neither node nor bun is reachable"
+    },
+    {
+      "number": 1,
+      "name": "--help lists every command",
+      "passed": true,
+      "exitCode": 0,
+      "detail": "raqib 0.2.0 — a light, offline reverse-engineering observatory"
+    },
+    {
+      "number": 2,
+      "name": "doctor reports the machine",
+      "passed": true,
+      "exitCode": 0,
+      "detail": "raqib doctor"
+    },
+    {
+      "number": 3,
+      "name": "analyze notepad.exe",
+      "passed": true,
+      "exitCode": 0,
+      "detail": "# pe — C:\\Windows\\System32\\notepad.exe"
+    },
+    {
+      "number": 4,
+      "name": "the PE report names its imports",
+      "passed": true,
+      "exitCode": 0,
+      "detail": "# pe — C:\\Windows\\System32\\notepad.exe"
+    },
+    {
+      "number": 5,
+      "name": "identify the installed browser",
+      "passed": true,
+      "exitCode": 0,
+      "detail": "# browser-identity — D:\\a\\_temp\\brave"
+    },
+    {
+      "number": 6,
+      "name": "search a tree of 1500 files",
+      "passed": true,
+      "exitCode": 0,
+      "detail": "200 match(es) in 216 file(s) — 1501 scanned in 168.6 ms using 2 worker thread(s)"
+    },
+    {
+      "number": 6,
+      "name": "the search used the worker threads",
+      "passed": true,
+      "exitCode": 0,
+      "detail": "2 worker threads"
+    },
+    {
+      "number": 7,
+      "name": "compare old-build with new-build",
+      "passed": true,
+      "exitCode": 0,
+      "detail": "0 fact(s) added, 0 removed, 5 changed; 1 location(s) added, 0 removed; 0 new gap(s), 0 closed."
+    },
+    {
+      "number": 8,
+      "name": "map a bundle back to its source",
+      "passed": true,
+      "exitCode": 0,
+      "detail": "# source-map — D:\\a\\_temp\\fixtures\\bundle.js"
+    },
+    {
+      "number": 9,
+      "name": "the map lists the original files",
+      "passed": true,
+      "exitCode": 0,
+      "detail": "# source-map — D:\\a\\_temp\\fixtures\\bundle.js"
+    },
+    {
+      "number": 10,
+      "name": "read an asar archive",
+      "passed": true,
+      "exitCode": 0,
+      "detail": "# asar — D:\\a\\_temp\\fixtures\\app.asar"
+    },
+    {
+      "number": 11,
+      "name": "read a package manifest",
+      "passed": true,
+      "exitCode": 0,
+      "detail": "# manifest — D:\\a\\_temp\\fixtures\\package.json"
+    },
+    {
+      "number": 12,
+      "name": "MCP lists all 11 tools",
+      "passed": true,
+      "exitCode": 0,
+      "detail": "11 tools"
+    },
+    {
+      "number": 13,
+      "name": "MCP answered a tool call",
+      "passed": true,
+      "exitCode": 0,
+      "detail": "inspect_binary on notepad.exe"
+    },
+    {
+      "number": 14,
+      "name": "runs from an unrelated working directory",
+      "passed": true,
+      "exitCode": 0,
+      "detail": "# pe — C:\\Windows\\System32\\notepad.exe"
+    },
+    {
+      "number": 15,
+      "name": "search a path with spaces and Arabic characters",
+      "passed": true,
+      "exitCode": 0,
+      "detail": "1 match(es) in 1 file(s) — 1 scanned in 3.7 ms using the main thread only"
+    },
+    {
+      "number": 16,
+      "name": "analyse a file with an Arabic name",
+      "passed": true,
+      "exitCode": 0,
+      "detail": "# strings — C:\\Users\\RUNNER~1\\AppData\\Local\\Temp\\مجلد عربي 5acced\\ملف تجريبي.txt"
+    },
+    {
+      "number": 17,
+      "name": "runs with nothing beside it",
+      "passed": true,
+      "exitCode": 0,
+      "detail": "# pe — C:\\Windows\\System32\\notepad.exe"
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+raqib: bundled D:\a\makar\makar\raqib\dist\sea\raqib.cjs
+Wrote single executable preparation blob to D:\a\makar\makar\raqib\dist\sea\sea-prep.blob
+raqib: blob 250.7 KiB
+raqib: fetching the Windows runtime 22.23.4 from the npm registry
+[36mStart injection of NODE_SEA_BLOB in D:\a\makar\makar\raqib\dist\Raqib.exe...[0m
+warning: The signature seems corrupted!
+[32m💉 Injection done![0m
+raqib: built D:\a\makar\makar\raqib\dist\Raqib.exe
+  size  : 83.4 MiB
+  sha256: 26cee8edf5ef4c0d00b074580872889fa58ff1ffdd25742d5cb2ef32e11a6b06

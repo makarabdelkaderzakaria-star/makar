@@ -1,0 +1,272 @@
+
+Raqib - testing the standalone executable
+  executable : D:\a\_temp\clean\Raqib.exe
+  size       : 87417344 bytes
+
+== The machine has no runtime but the executable
+  node on PATH : not found
+  bun  on PATH : not found
+  PASS  no node, no bun
+
+== 1. --help
+  PASS  01. --help lists every command
+  (all 18 commands present in the help text)
+
+== 2. doctor
+  PASS  02. doctor reports the machine
+
+== 3. a real Windows binary (notepad.exe)
+  PASS  03. analyze notepad.exe
+  (notepad reports: # pe — C:\Windows\System32\notepad.exe)
+  PASS  04. the PE report names its imports
+# pe — C:\Windows\System32\notepad.exe
+
+x86-64 executable for the windows GUI subsystem, 50 imported libraries, 0 exports, no Authenticode certificate. Hardening: ASLR, DEP, CFG.
+
+evidence_id: ev_2f24627eaf6088b6
+
+## Facts
+- pe.machine: x86-64
+- pe.subsystem: windows GUI
+- pe.is_dll: false
+- pe.is_driver: false
+- pe.entry_point: 0x19b0
+- pe.image_base: 0x140000000
+- pe.sections: 8
+- pe.import_dlls: 50
+- pe.imported_functions: 315
+- pe.exported_functions: 0
+- pe.export_name: none
+- pe.certificate: none
+- pe.imphash: 724d4e98d2a7894d079e655d74549372
+- pe.timestamp: 2036-03-01T22:37:00.000Z
+- hardening.aslr: true
+- hardening.high_entropy_aslr: true
+- hardening.dep: true
+- hardening.cfg: true
+- hardening.force_integrity: false
+
+## Not proven
+- No export table was found.
+
+
+== 4. a Chromium-family browser
+  PASS  05. identify the installed browser
+  (browser says: # browser-identity — D:\a\_temp\brave)
+
+== 5. the search engine and its worker threads
+  PASS  06. search a tree of 1500 files
+  (the search used 2 worker thread(s) - the embedded worker started)
+
+== 6. compare two builds
+  PASS  07. compare old-build with new-build
+0 fact(s) added, 0 removed, 5 changed; 1 location(s) added, 0 removed; 0 new gap(s), 0 closed.
+
+left  : ev_f08599ba3127d085  D:\a\_temp\fixtures\old-build
+right : ev_c475f2ceea6caf5f  D:\a\_temp\fixtures\new-build
+
+  ~ app.version: 1.0.0  ->  1.1.0
+  ~ app.entry_point: D:\a\_temp\fixtures\old-build/src/main.js  ->  D:\a\_temp\fixtures\new-build/src/main.js
+  ~ app.source_bytes: 67  ->  101
+  ~ ipc.handled_channels: 2  ->  3
+  ~ ipc.unmatched_channels: 2  ->  3
+
+
+
+== 7. source maps
+  PASS  08. map a bundle back to its source
+# source-map — D:\a\_temp\fixtures\bundle.js
+
+Source map with 2 original file(s) across 4 generated line(s); 2 of them carry their source inline.
+
+evidence_id: ev_c66ef5ce5c4c12ad
+
+## Facts
+- sourcemap.bundle: D:\a\_temp\fixtures\bundle.js
+- sourcemap.file: D:\a\_temp\fixtures\bundle.js.map
+- sourcemap.original_sources: 2
+- sourcemap.embedded_sources: 2
+- sourcemap.generated_lines: 4
+
+## Locations
+- ../src/main.ts:3:1 — the original source of the requested position
+- ../src/app.ts — source is embedded in the map
+- ../src/main.ts — source is embedded in the map
+
+resolution: D:\a\_temp\fixtures\bundle.js:7:1  ->  ../src/main.ts:3:1
+
+Original sources:
+  * ../src/app.ts
+  * ../src/main.ts
+  (* source is embedded in the map, - source is not embedded)
+
+  PASS  09. the map lists the original files
+# source-map — D:\a\_temp\fixtures\bundle.js
+
+Source map with 2 original file(s) across 4 generated line(s); 2 of them carry their source inline.
+
+evidence_id: ev_c66ef5ce5c4c12ad
+
+## Facts
+- sourcemap.bundle: D:\a\_temp\fixtures\bundle.js
+- sourcemap.file: D:\a\_temp\fixtures\bundle.js.map
+- sourcemap.original_sources: 2
+- sourcemap.embedded_sources: 2
+- sourcemap.generated_lines: 4
+
+## Locations
+- ../src/app.ts — source is embedded in the map
+- ../src/main.ts — source is embedded in the map
+
+resolution: not requested or not resolvable
+
+Original sources:
+  * ../src/app.ts
+  * ../src/main.ts
+  (* source is embedded in the map, - source is not embedded)
+
+
+== 8. ASAR archives
+  PASS  10. read an asar archive
+# asar — D:\a\_temp\fixtures\app.asar
+
+ASAR archive with 2 files (90 bytes of payload) under 1 top-level entries; 0 marked executable.
+
+evidence_id: ev_21e18c44ea680a04
+
+## Facts
+- asar.files: 2
+- asar.payload_bytes: 90
+- asar.data_offset: 136
+- asar.executable_entries: 0
+- asar.top_level: app
+
+## Not proven
+- Unpacked entries live in the sibling .unpacked directory and are not part of this archive.
+
+
+== 9. package manifests
+  PASS  11. read a package manifest
+# manifest — D:\a\_temp\fixtures\package.json
+
+fixture-manifest 2.3.1: 2 runtime dependencies, 1 script(s), entry point src/main.js.
+
+evidence_id: ev_09e3515de9d9fc68
+
+## Facts
+- manifest.format: package-manifest
+- manifest.name: fixture-manifest
+- manifest.version: 2.3.1
+- manifest.description: a manifest for the executable to read
+- manifest.main: src/main.js
+- manifest.dependencies: 2
+- manifest.dev_dependencies: 1
+- manifest.scripts: 1
+- manifest.bin: 0
+- manifest.top_level_keys: 9
+- manifest.bytes: 404
+- manifest.electron_version: 31.0.0
+
+## Not proven
+- A manifest declares intent; the shipped code may not match it.
+- Versions here are the declared versions, not the versions actually installed.
+
+
+== 10. the MCP server over stdio
+  PASS  12. MCP lists all 11 tools
+  PASS  13. MCP answered a tool call
+
+== 11. it runs from anywhere
+  PASS  14. runs from an unrelated working directory
+# pe — C:\Windows\System32\notepad.exe
+
+x86-64 executable for the windows GUI subsystem, 50 imported libraries, 0 exports, no Authenticode certificate. Hardening: ASLR, DEP, CFG.
+
+evidence_id: ev_2f24627eaf6088b6
+
+## Facts
+- pe.machine: x86-64
+- pe.subsystem: windows GUI
+- pe.is_dll: false
+- pe.is_driver: false
+- pe.entry_point: 0x19b0
+- pe.image_base: 0x140000000
+- pe.sections: 8
+- pe.import_dlls: 50
+- pe.imported_functions: 315
+- pe.exported_functions: 0
+- pe.export_name: none
+- pe.certificate: none
+- pe.imphash: 724d4e98d2a7894d079e655d74549372
+- pe.timestamp: 2036-03-01T22:37:00.000Z
+- hardening.aslr: true
+- hardening.high_entropy_aslr: true
+- hardening.dep: true
+- hardening.cfg: true
+- hardening.force_integrity: false
+
+## Not proven
+- No export table was found.
+
+
+== 12. paths with spaces and Arabic characters
+  PASS  15. search a path with spaces and Arabic characters
+1 match(es) in 1 file(s) — 1 scanned in 3.7 ms using the main thread only
+
+ملف تجريبي.txt:1:8  needle-FOUND inside an Arabic path
+
+  PASS  16. analyse a file with an Arabic name
+# strings — C:\Users\RUNNER~1\AppData\Local\Temp\مجلد عربي 5acced\ملف تجريبي.txt
+
+1 printable strings recovered from a 36 byte image (1 distinct).
+
+evidence_id: ev_2e4502bc43fd6849
+
+## Facts
+- strings.total: 1
+- strings.distinct: 1
+- file.bytes: 36
+
+## Not proven
+- String extraction proves what the image contains, not what the code does with it.
+- Strings that were stripped, compressed or built at runtime are not visible here.
+
+
+== 13. the executable does not need anything beside it
+  the folder holds: Raqib.exe
+  PASS  17. runs with nothing beside it
+# pe — C:\Windows\System32\notepad.exe
+
+x86-64 executable for the windows GUI subsystem, 50 imported libraries, 0 exports, no Authenticode certificate. Hardening: ASLR, DEP, CFG.
+
+evidence_id: ev_2f24627eaf6088b6
+
+## Facts
+- pe.machine: x86-64
+- pe.subsystem: windows GUI
+- pe.is_dll: false
+- pe.is_driver: false
+- pe.entry_point: 0x19b0
+- pe.image_base: 0x140000000
+- pe.sections: 8
+- pe.import_dlls: 50
+- pe.imported_functions: 315
+- pe.exported_functions: 0
+- pe.export_name: none
+- pe.certificate: none
+- pe.imphash: 724d4e98d2a7894d079e655d74549372
+- pe.timestamp: 2036-03-01T22:37:00.000Z
+- hardening.aslr: true
+- hardening.high_entropy_aslr: true
+- hardening.dep: true
+- hardening.cfg: true
+- hardening.force_integrity: false
+
+## Not proven
+- No export table was found.
+
+
+-----------------------------------------------
+19 of 19 checks passed
+-----------------------------------------------
+  results written to D:\a\_temp\results.json
