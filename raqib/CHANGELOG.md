@@ -7,6 +7,16 @@ All notable changes to Raqib are documented here. The format follows
 
 ### Added
 
+- **A standalone Windows executable** — `Raqib.exe` is one file that carries
+  its own JavaScript engine: no Node.js, no Bun, no npm, nothing to install.
+  It was checked on a real Windows x64 machine with Node.js renamed out of
+  the way, from a folder that held nothing else: 19 checks, 19 passed.
+  See `RELEASE-WINDOWS.md` and `README-WINDOWS.md`.
+- **A reproducible build** — the same source now gives byte for byte the same
+  executable on any machine: the base runtime is always the official Windows
+  build of Node 22.23.4, the single-executable blob names the bundle
+  relatively, and every text file checks out with the same line endings.
+
 - **Source map resolution** — a version-3 reader with a base64 VLQ decoder.
   It lists the original files a bundle was built from and maps positions in
   both directions: a position in the bundle back to its original file, and an
@@ -38,6 +48,15 @@ All notable changes to Raqib are documented here. The format follows
   <entry>` reads the entry it was given.
 
 ### Fixed
+
+- The search worker never ran: the caller sent its work with `postMessage`
+  while the worker read it from `workerData`, so every search quietly fell
+  back to the main thread. The two now speak the same language, and there are
+  tests that would have caught it.
+- The UTF-16 scanner lost its alignment after the first string, so a Windows
+  executable's version resource — where the product name and the product
+  version are kept apart — could never be read. The browser detector now
+  reaches the end of a large executable and puts the two back together.
 
 - The source map VLQ decoder reported the number of values it read instead of
   the number of characters, which truncated every multi-field segment.

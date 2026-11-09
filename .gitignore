@@ -7,3 +7,6 @@ netrocket.conf
 .env
 .env.*
 !.env.example
+
+# the files the Drive connector downloads, for checking. They are copies.
+google_drive/

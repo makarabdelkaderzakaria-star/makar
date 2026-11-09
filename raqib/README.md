@@ -114,29 +114,46 @@ to create repositories; nothing else is contacted.
 
 ## On Windows
 
-Raqib is one JavaScript file, not a compiled executable, so the same
-`raqib.mjs` runs on every operating system. Nothing is rebuilt for Windows
-and nothing needs a build step there.
+**`Raqib.exe` is a standalone executable.** It carries its own JavaScript
+engine: Node.js, Bun and npm are *not* needed, and nothing has to be
+installed. Copy the one file anywhere and run it.
 
 ```powershell
-# 1. download raqib-0.2.0-windows.zip and extract it
-Expand-Archive -Path raqib-0.2.0-windows.zip -DestinationPath raqib
-cd raqib\raqib-0.2.0-windows
+# 1. download Raqib-0.2.0-windows-x64.zip and extract it
+Expand-Archive -Path Raqib-0.2.0-windows-x64.zip -DestinationPath raqib
+cd raqib
 
-# 2. check the bundle
-certutil -hashfile raqib.mjs SHA256     # compare with SHA256SUMS
+# 2. check it
+certutil -hashfile Raqib.exe SHA256      # compare with SHA256SUMS
 
 # 3. run it
-node raqib.mjs --help
-node raqib.mjs doctor
-node raqib.mjs analyze C:\Windows\System32\notepad.exe
-
-# or use the launcher that comes with it
-.\raqib.cmd browser "C:\Program Files\BraveSoftware\Brave-Browser"
+.\Raqib.exe --help
+.\Raqib.exe doctor
+.\Raqib.exe analyze C:\Windows\System32\notepad.exe
+.\Raqib.exe browser "C:\Program Files\BraveSoftware\Brave-Browser"
 ```
 
-Node 20.11 or newer is the only requirement. `raqib setup claude` writes the
-same local registration it does on every other platform.
+The executable was checked on a real Windows x64 machine with Node.js renamed
+out of the way and taken off the `PATH`, from a folder that held nothing but
+the executable: 19 checks, 19 passed, including the parallel search worker
+and the MCP server. The details are in
+[`RELEASE-WINDOWS.md`](RELEASE-WINDOWS.md), and the raw result is inside the
+archive as `results.json`.
+
+The build is reproducible: the same source gives byte for byte the same
+executable, so the checksum above is a fact about the program and not about a
+particular morning.
+
+If you would rather run the JavaScript — it is the same program, and it is in
+the archive as `script/raqib.mjs`:
+
+```powershell
+node .\script\raqib.mjs --help
+```
+
+That one needs Node 20.11 or newer. `raqib setup claude` writes the same
+local registration on every platform: inside the executable it registers the
+executable itself.
 
 Windows install locations are known to Raqib: Brave, Chrome, Chromium, Edge,
 Vivaldi and Opera are all in `raqib doctor`, and `raqib browser` identifies an
