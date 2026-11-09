@@ -101,8 +101,9 @@ analysis 54 ms, index 152 ms, search 190 ms, JS application analysis 70 ms.
 
 | | |
 |---|---|
-| Release bundle (linux x64) | https://drive.google.com/file/d/1-6EnYwpkMqIpaY-OuzSALdYS_sVZuMLx/view |
-| Full source | https://drive.google.com/file/d/1snxoNKbyHL7OX3TLmisYRZCbDSQdp-fo/view |
+| **Windows** (zip) | https://drive.google.com/file/d/17MuT3DaURoNvnqBL5BoZRRJmkgNU1scp/view |
+| Release bundle (linux x64) | https://drive.google.com/file/d/1OIZjFy7rK8ngXgOR2PVAd5vKrkGSwVQu/view |
+| Full source | https://drive.google.com/file/d/1VV8Bnh33q0nn1mAUWGV-ss99rkOq03LK/view |
 | Folder | https://drive.google.com/drive/folders/1TijuzghilDd7xOTY0Zw_rOphb_Lo_BE_ |
 
 Both files are readable by anyone with the link.
@@ -118,16 +119,36 @@ The release bundle is self-contained: `raqib.mjs`, the search worker, the
 documentation, `TRY-IT.md` (a bilingual quick start), `BUILD-INFO.txt` and
 `SHA256SUMS`. Nothing to install.
 
-Both published files were downloaded back from Drive and verified: the
-checksums match and the downloaded copy runs.
+All three published files were downloaded back from Drive and verified: the
+checksums match and the downloaded copies run.
+
+## On Windows
+
+`raqib.mjs` is JavaScript, not a compiled executable, so the same file runs
+everywhere. The zip carries a `raqib.cmd` launcher and a `TRY-IT.md` quick
+start in Arabic and English.
+
+```powershell
+Expand-Archive -Path raqib-0.2.0-windows.zip -DestinationPath raqib
+cd raqib\raqib-0.2.0-windows
+certutil -hashfile raqib.mjs SHA256
+node raqib.mjs --help
+.\raqib.cmd browser "C:\Program Files\BraveSoftware\Brave-Browser"
+```
+
+Node 20.11 or newer is the only requirement. Raqib knows the Windows install
+locations of Brave, Chrome, Chromium, Edge, Vivaldi and Opera, and identifies
+an installed browser from its own executable rather than from its folder
+name. The CI matrix already builds and tests on `windows-latest`.
 
 ---
 
 ## SHA-256
 
 ```
-049da875b07ee294e4c2a546310691f2913c6338b0feb3c81726cc36b3294649  raqib-0.2.0-linux-x64.tar.gz
-d1550de9d08e399cb7379c6292691e0a6adcca3faf688c5c7834c168b6a9d063  raqib-0.2.0-source.tar.gz
+db7b3cb02d281658bf4e4d79ee96a57a15e457ffa581566138377e87b536454a  raqib-0.2.0-windows.zip
+4771ac70c157d62eb2f908bfd4e1a9c354720cef5d86854b52ac4a5f9b5d374b  raqib-0.2.0-linux-x64.tar.gz
+d027742af569bb502d4b5910de52718b58c28ceb6d8d3e18bf03fe311a149f54  raqib-0.2.0-source.tar.gz
 ```
 
 63 tests pass; `tsc --noEmit` is clean.

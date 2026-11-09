@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { analyzeChromiumTree, chromiumTreeEvidence, identifyBrowser, browserIdentityEvidence } from '../src/core/chromium.js';
+import { analyzeChromiumTree, chromiumTreeEvidence, identifyBrowser, browserIdentityEvidence, browserSearchPaths } from '../src/core/chromium.js';
 
 async function braveTree(): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), 'raqib-chromium-'));
@@ -105,4 +105,24 @@ test('says so when a directory holds no browser', async () => {
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
+});
+
+test('the browser install list covers Windows, and says where', () => {
+  const paths = browserSearchPaths();
+  const labels = paths.map((p) => p.label);
+
+  assert.ok(labels.some((l) => l.includes('Brave (Windows)')));
+  assert.ok(labels.some((l) => l.includes('Chrome (Windows)')));
+  assert.ok(labels.some((l) => l.includes('Edge (Windows)')));
+
+  // Windows paths must look like Windows paths, with backslashes, whatever
+  // machine Raqib happens to be running on.
+  const brave = paths.find((p) => p.label === 'Brave (Windows)');
+  assert.ok(brave);
+  assert.match(brave!.path, /^C:\\Program Files\\BraveSoftware\\Brave-Browser$/);
+  assert.ok(!brave!.path.includes('/'), 'a Windows path must not contain a forward slash');
+
+  // The per-user entries exist only where %LOCALAPPDATA% exists.
+  const perUser = paths.filter((p) => p.label.includes(', user'));
+  assert.equal(perUser.length, process.env.LOCALAPPDATA ? 5 : 0);
 });

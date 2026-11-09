@@ -45,6 +45,63 @@ node raqib.mjs manifest ./app/package.json
 node raqib.mjs search ./src "contextBridge" --context 2
 ```
 
+## 2-ب. على ويندوز / On Windows
+
+الحزمة نفسها تعمل على ويندوز بلا أي تعديل — الملف `raqib.mjs` هو JavaScript
+وليست ملفاً تنفيذياً مُصرَّفاً، فهو واحد على كل الأنظمة.
+
+The same bundle runs on Windows unchanged: `raqib.mjs` is JavaScript, not a
+compiled executable, and it is one file for every operating system.
+
+**1. نزّل الحزمة** — `raqib-0.2.0-windows.zip` (صُنع خصيصاً لويندوز، لأن
+ويندوز فيه فكّ ضغط zip مدمج بينما tar.gz يحتاج أداة خارجية).
+
+Download `raqib-0.2.0-windows.zip` — built for Windows, which has a built-in
+unzip while `.tar.gz` needs an extra tool.
+
+**2. افتحها** بنقرة يمين ← *Extract All*، أو من PowerShell:
+
+```powershell
+Expand-Archive -Path raqib-0.2.0-windows.zip -DestinationPath raqib
+cd raqib\raqib-0.2.0-windows
+```
+
+**3. شغّلها:**
+
+```powershell
+node raqib.mjs --help
+node raqib.mjs doctor
+```
+
+أو استخدم المشغّل المرفق `raqib.cmd` الذي يتيح لك كتابة `raqib` بدل `node raqib.mjs`:
+
+```powershell
+.\raqib.cmd analyze C:\\Windows\\System32\\notepad.exe
+.\raqib.cmd browser "C:\\Program Files\\BraveSoftware\\Brave-Browser"
+```
+
+**4. تحقّق من سلامة الملف** — على ويندوز:
+
+```powershell
+certutil -hashfile raqib.mjs SHA256
+```
+
+وقارن النتيجة مع السطر المقابل في `SHA256SUMS`.
+
+**5. لو لم يكن Node مثبتاً:** نزّل Node 20.11 أو أحدث من nodejs.org، ثبّته،
+ثم أعد تشغيل الطرفية. لا شيء آخر مطلوب — لا `npm install`، ولا خطوة بناء.
+
+**6. للوكيل** — التسجيل محلي بالكامل:
+
+```powershell
+node raqib.mjs setup claude
+```
+
+**ملاحظة عن المسارات:** أدخل المسارات بين علامتي تنصيص إذا احتوت على مسافات،
+مثل `"C:\Program Files\BraveSoftware\Brave-Browser"`. Raiqib يتعرّف على
+المتصفحات من ملفها التنفيذي مباشرة (يقرأ `Product-String`)، فلا يعتمد على
+أسماء المجلدات.
+
 ## 3. من وكيلك / From your agent
 
 التسجيل **محلي بالكامل** — لا يُنزَّل شيء / The registration is entirely local —

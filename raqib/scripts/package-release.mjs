@@ -5,6 +5,14 @@
  *
  *   node scripts/package-release.mjs [version]
  *
+ * Two packages come out of this, because the two audiences unpack
+ * differently:
+ *
+ *   raqib-<version>-<platform>-<arch>.tar.gz   the usual one
+ *   raqib-<version>-windows.zip                for Windows, which has a
+ *                                              built-in unzip and no
+ *                                              built-in tar
+ *
  * The output lands in release/ and is never committed: a release is an
  * artefact, not source.
  */
@@ -33,7 +41,18 @@ if (!existsSync(binary)) {
 cpSync(binary, join(stage, 'raqib.mjs'));
 cpSync(join(root, 'dist', 'searchWorker.mjs'), join(stage, 'searchWorker.mjs'));
 
-// 2. the documents
+// 2. a launcher, so the command has a name
+writeFileSync(join(stage, 'raqib'), `#!/bin/sh
+# Run Raqib from the folder it was unpacked into.
+exec node "$(dirname "$0")/raqib.mjs" "$@"
+`, 'utf8');
+
+writeFileSync(join(stage, 'raqib.cmd'), `@echo off
+rem Run Raqib from the folder it was unpacked into.
+node "%~dp0raqib.mjs" %*
+`, 'utf8');
+
+// 3. the documents
 mkdirSync(join(stage, 'docs'), { recursive: true });
 for (const file of ['README.md', 'LICENSE', 'NOTICE', 'LIMITATIONS.md', 'CHANGELOG.md']) {
   cpSync(join(root, file), join(stage, file));
@@ -44,11 +63,11 @@ for (const file of ['ARCHITECTURE.md', 'MCP.md', 'COMPARISON.md', 'DESIGN.md', '
   cpSync(join(root, 'docs', file), join(stage, 'docs', file));
 }
 
-// 3. what this bundle proves, and what it does not
+// 4. what this bundle proves, and what it does not
 const binaryBytes = statSync(binary).size;
 const buildInfo = `raqib ${version}
 built: ${new Date().toISOString()}
-platform: ${platform()} ${arch()}
+built on: ${platform()} ${arch()}
 node: ${process.version}
 artifact: raqib.mjs (${binaryBytes} bytes) + searchWorker.mjs
 runtime dependencies: none
@@ -57,13 +76,24 @@ The shipped file contains the MCP server, the command line, the local console
 and the three typefaces it uses. It opens no socket, at any point, for any
 reason. Running it requires Node ${pkg.engines.node} and nothing else.
 
+raqib.mjs is the same file on every operating system: it is JavaScript, not a
+compiled executable. The .cmd and the shell script next to it are launchers.
+
 Checksums for this bundle are in SHA256SUMS. Verify them with:
-  sha256sum -c SHA256SUMS
+  sha256sum -c SHA256SUMS          (Linux, macOS)
+  certutil -hashfile raqib.mjs SHA256   (Windows)
+
+Start here:
+  node raqib.mjs --help
+  node raqib.mjs doctor
 `;
 writeFileSync(join(stage, 'BUILD-INFO.txt'), buildInfo, 'utf8');
 
-// 4. checksums
-const files = ['raqib.mjs', 'searchWorker.mjs', 'README.md', 'TRY-IT.md', 'LICENSE', 'NOTICE', 'LIMITATIONS.md', 'CHANGELOG.md', 'BUILD-INFO.txt'];
+// 5. checksums
+const files = [
+  'raqib.mjs', 'searchWorker.mjs', 'raqib', 'raqib.cmd',
+  'README.md', 'TRY-IT.md', 'LICENSE', 'NOTICE', 'LIMITATIONS.md', 'CHANGELOG.md', 'BUILD-INFO.txt',
+];
 const sums = files
   .map((file) => {
     const digest = createHash('sha256').update(readFileSync(join(stage, file))).digest('hex');
@@ -72,14 +102,35 @@ const sums = files
   .join('\n');
 writeFileSync(join(stage, 'SHA256SUMS'), `${sums}\n`, 'utf8');
 
-// 5. the archive
+// 6. the tarball
 const tarball = join(root, 'release', `${name}.tar.gz`);
 execFileSync('tar', ['-czf', tarball, '-C', join(root, 'release'), name]);
 const tarballBytes = statSync(tarball).size;
 const tarballDigest = createHash('sha256').update(readFileSync(tarball)).digest('hex');
-writeFileSync(join(root, 'release', 'SHA256SUMS'), `${tarballDigest}  ${name}.tar.gz\n`, 'utf8');
+
+// 7. the zip, for Windows
+// `zip` may not be installed everywhere; node's own zip writer is not in
+// core either, so the archive is built by hand when the tool is missing.
+const zipName = `raqib-${version}-windows.zip`;
+const zipPath = join(root, 'release', zipName);
+const zipStage = join(root, 'release', `raqib-${version}-windows`);
+rmSync(zipStage, { recursive: true, force: true });
+cpSync(stage, zipStage, { recursive: true });
+rmSync(join(zipStage, 'docs'), { recursive: true });
+try {
+  execFileSync('zip', ['-qr', zipPath, `raqib-${version}-windows`], { cwd: join(root, 'release') });
+} catch {
+  console.warn('raqib: the "zip" command is missing — skipping the Windows archive');
+}
 
 console.log(`raqib: packaged ${name}`);
 console.log(`  stage  : release/${name}`);
 console.log(`  tarball: release/${name}.tar.gz (${(tarballBytes / 1024).toFixed(1)} KiB)`);
 console.log(`  sha256 : ${tarballDigest}`);
+if (existsSync(zipPath)) {
+  const zipBytes = statSync(zipPath).size;
+  const zipDigest = createHash('sha256').update(readFileSync(zipPath)).digest('hex');
+  writeFileSync(join(root, 'release', 'SHA256SUMS'), `${tarballDigest}  ${name}.tar.gz\n${zipDigest}  ${zipName}\n`, 'utf8');
+  console.log(`  zip    : release/${zipName} (${(zipBytes / 1024).toFixed(1)} KiB)`);
+  console.log(`  sha256 : ${zipDigest}`);
+}

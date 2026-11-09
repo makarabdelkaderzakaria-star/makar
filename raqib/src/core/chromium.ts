@@ -11,7 +11,8 @@
  *     than trusting a file name.
  */
 import { readFile } from 'node:fs/promises';
-import { basename, join } from 'node:path';
+import { homedir } from 'node:os';
+import { basename, join, win32 } from 'node:path';
 import { makeEvidence, type Evidence, type Fact, type SourceLocation } from './evidence.js';
 import { walk, formatBytes, DEFAULT_IGNORE_DIRS } from './util.js';
 import { extractStrings } from './strings.js';
@@ -357,9 +358,24 @@ export function browserIdentityEvidence(identity: BrowserIdentity): Evidence {
   });
 }
 
-/** Locate the conventional install directory of a Chromium-family browser. */
+/**
+ * The conventional install directory of every Chromium-family browser.
+ *
+ * Windows gets the most entries: Chromium, Edge and Vivaldi install to
+ * several places depending on how they were installed, and the per-user
+ * locations under `%LOCALAPPDATA%` are where most people actually find them.
+ */
 export function browserSearchPaths(): Array<{ label: string; path: string }> {
-  const home = process.env.HOME ?? '';
+  // `homedir()` rather than `process.env.HOME`: on Windows HOME is usually
+  // not set at all, which would silently produce a relative path.
+  const home = homedir();
+  // Only present on Windows. When it is missing there is no per-user install
+  // directory to point at, and inventing one from a Unix home path would
+  // print a path that cannot exist.
+  const localAppData = process.env.LOCALAPPDATA;
+  const programFiles = process.env.ProgramFiles ?? 'C:\\Program Files';
+  const programFilesX86 = process.env['ProgramFiles(x86)'] ?? 'C:\\Program Files (x86)';
+
   return [
     { label: 'Brave (Linux)', path: '/usr/lib/brave-browser' },
     { label: 'Brave (user)', path: join(home, '.local/share/brave-browser') },
@@ -369,8 +385,21 @@ export function browserSearchPaths(): Array<{ label: string; path: string }> {
     { label: 'Vivaldi (Linux)', path: '/opt/vivaldi' },
     { label: 'Brave (macOS)', path: '/Applications/Brave Browser.app' },
     { label: 'Chrome (macOS)', path: '/Applications/Google Chrome.app' },
-    { label: 'Brave (Windows)', path: 'C:\\Program Files\\BraveSoftware\\Brave-Browser' },
-    { label: 'Chrome (Windows)', path: 'C:\\Program Files\\Google\\Chrome' },
+    // Windows paths are built with win32.join so they read as Windows paths
+    // even when Raqib is the one reporting them from another machine.
+    { label: 'Brave (Windows)', path: win32.join(programFiles, 'BraveSoftware', 'Brave-Browser') },
+    { label: 'Chrome (Windows)', path: win32.join(programFiles, 'Google', 'Chrome') },
+    { label: 'Edge (Windows)', path: win32.join(programFilesX86, 'Microsoft', 'Edge', 'Application') },
+    { label: 'Opera (Windows)', path: win32.join(programFiles, 'Opera') },
+    ...(localAppData
+      ? [
+        { label: 'Brave (Windows, user)', path: win32.join(localAppData, 'BraveSoftware', 'Brave-Browser') },
+        { label: 'Chrome (Windows, user)', path: win32.join(localAppData, 'Google', 'Chrome') },
+        { label: 'Chromium (Windows)', path: win32.join(localAppData, 'Chromium', 'Application') },
+        { label: 'Edge (Windows, user)', path: win32.join(localAppData, 'Microsoft', 'Edge', 'Application') },
+        { label: 'Vivaldi (Windows)', path: win32.join(localAppData, 'Vivaldi', 'Application') },
+      ]
+      : []),
   ];
 }
 

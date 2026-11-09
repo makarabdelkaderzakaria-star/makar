@@ -50,7 +50,7 @@ git clone https://github.com/makarabdelkaderzakaria-star/raqib
 cd raqib
 npm install          # development only: typescript + esbuild + fonts
 npm run build        # produces dist/raqib.mjs (one file, 224 KB)
-npm test             # 63 tests
+npm test             # 64 tests
 ```
 
 The shipped artifact has **no runtime dependencies**. Node 20.11+ is the only
@@ -111,6 +111,36 @@ repository under a new name, with its own history:
 It stages a clean copy (no `node_modules`, no `dist`), commits it, creates
 `<your-account>/my-raqib` and pushes. You need the GitHub CLI with permission
 to create repositories; nothing else is contacted.
+
+## On Windows
+
+Raqib is one JavaScript file, not a compiled executable, so the same
+`raqib.mjs` runs on every operating system. Nothing is rebuilt for Windows
+and nothing needs a build step there.
+
+```powershell
+# 1. download raqib-0.2.0-windows.zip and extract it
+Expand-Archive -Path raqib-0.2.0-windows.zip -DestinationPath raqib
+cd raqib\raqib-0.2.0-windows
+
+# 2. check the bundle
+certutil -hashfile raqib.mjs SHA256     # compare with SHA256SUMS
+
+# 3. run it
+node raqib.mjs --help
+node raqib.mjs doctor
+node raqib.mjs analyze C:\Windows\System32\notepad.exe
+
+# or use the launcher that comes with it
+.\raqib.cmd browser "C:\Program Files\BraveSoftware\Brave-Browser"
+```
+
+Node 20.11 or newer is the only requirement. `raqib setup claude` writes the
+same local registration it does on every other platform.
+
+Windows install locations are known to Raqib: Brave, Chrome, Chromium, Edge,
+Vivaldi and Opera are all in `raqib doctor`, and `raqib browser` identifies an
+installed one from its own executable rather than from its folder name.
 
 ## Reading a manifest
 
