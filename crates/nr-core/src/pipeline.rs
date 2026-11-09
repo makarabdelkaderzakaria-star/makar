@@ -1510,21 +1510,23 @@ mod tests {
         let f = conn_ecn(51515, ecn::codepoint::ECT0);
         assert!(ecn::is_ecn_capable(&f), "the fixture must be ECN-capable");
 
-        // Two frames fit inside the burst; the third is over the limit, and an
-        // ECN-capable transport wants a mark rather than a delay.
-        assert_eq!(decision_of(&mut e, &f, 0), Decision::SendNow);
-        assert_eq!(decision_of(&mut e, &f, 1), Decision::SendNow);
-        assert_eq!(decision_of(&mut e, &f, 2), Decision::MarkEcn);
+        // The configured burst is raised to four MTUs, which at 8 MB/s covers
+        // exactly `BURST_FRAMES` frames at `now = 0`. The one after that is over
+        // the limit, and an ECN-capable transport wants a mark, not a delay.
+        for _ in 0..BURST_FRAMES {
+            assert_eq!(decision_of(&mut e, &f, 0), Decision::SendNow);
+        }
+        assert_eq!(decision_of(&mut e, &f, 0), Decision::MarkEcn);
     }
 
     #[test]
     fn an_ecn_mark_is_counted_and_retains_nothing() {
         let mut e = spec_engine("burst 1500 policy ecn");
         let f = conn_ecn(51515, ecn::codepoint::ECT0);
-        decision_of(&mut e, &f, 0);
-        decision_of(&mut e, &f, 1);
-        let out = decision_of(&mut e, &f, 2);
-        assert_eq!(out, Decision::MarkEcn);
+        for _ in 0..BURST_FRAMES {
+            decision_of(&mut e, &f, 0);
+        }
+        assert_eq!(decision_of(&mut e, &f, 0), Decision::MarkEcn);
         assert_eq!(e.snapshot().marked_ecn, 1);
         assert_eq!(e.snapshot().retained, 0, "marking must not retain");
     }
@@ -1533,14 +1535,15 @@ mod tests {
     fn an_ecn_limit_shapes_a_packet_that_cannot_carry_the_signal() {
         let mut e = spec_engine("burst 1500 policy ecn");
         let f = conn_ecn(51515, ecn::codepoint::ECT0);
-        decision_of(&mut e, &f, 0);
-        decision_of(&mut e, &f, 1);
+        for _ in 0..BURST_FRAMES {
+            decision_of(&mut e, &f, 0);
+        }
 
         // A Not-ECT packet has no way to carry the signal, so `ecn` falls back
         // to shaping instead of dropping or corrupting it.
         let plain = conn(51516);
         assert!(!ecn::is_ecn_capable(&plain));
-        let out = decision_of(&mut e, &plain, 2);
+        let out = decision_of(&mut e, &plain, 0);
         assert!(
             matches!(out, Decision::Retain { .. }),
             "a Not-ECT packet must be shaped, got {out:?}"
