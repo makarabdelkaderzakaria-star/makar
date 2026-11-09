@@ -1,0 +1,49 @@
+Raqib
+Copyright (c) 2026 makarabdelkaderzakaria-star
+
+This product includes software developed as an independent re-implementation.
+
+Inspiration
+----------
+The design of this tool — an MCP server that inspects binaries, JavaScript
+applications and Chromium-family trees without executing them, and returns
+answers with their evidence and their limits — follows the work published in
+the REA project:
+
+    REA: Reverse Engineer Anything
+    https://github.com/morluto/rea
+    Licensed under the MIT License
+    Copyright (c) 2025 ShuaixinHuang and contributors
+
+No source code from REA was copied into Raqib. The parsers, the evidence
+model, the MCP surface, the command line and the console were written from
+the public format specifications (System V ELF, the Microsoft PE/COFF
+specification, the Electron ASAR format) and from the observed behaviour of
+the tools Raqib replaces.
+
+The Chromium-family analysis is designed against the layout of the Chromium
+and brave-core source trees:
+
+    brave-core — a fork of Chromium
+    https://github.com/brave/brave-core
+    Licensed under the Mozilla Public License 2.0
+    Copyright (c) 2015–2026 Brave Software, Inc. and Chromium contributors
+
+    Chromium
+    https://chromium.googlesource.com/chromium/src
+    Licensed under the BSD 3-Clause License
+    Copyright (c) 2008–2026 The Chromium Authors
+
+Raqib ships no Chromium or Brave code. It reads trees that belong to their
+owners.
+
+Typefaces
+---------
+The console inlines three open-source typefaces:
+
+    Bricolage Grotesque — SIL Open Font License 1.1
+    IBM Plex Sans       — SIL Open Font License 1.1
+    IBM Plex Mono       — SIL Open Font License 1.1
+
+They are bundled under the SIL Open Font License; see the licence texts in
+`licenses/`.

@@ -94,6 +94,12 @@ byte-budgeted buffer that is ordered by due time, capped at 250 ms, and sheds
 the stalest packet rather than the newest. No allocation, no lock, and no OS call
 happens in that path. Details: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
+## Projects in this repository
+
+| Project | What it is |
+|---|---|
+| [`raqib/`](raqib/README.md) | A light, offline reverse-engineering observatory: an MCP server, a CLI and a local console that read ELF/PE binaries, JavaScript and Electron applications, ASAR archives and Chromium-family source trees — in 224 KB, with zero runtime dependencies and no network access. It is a from-scratch re-implementation of the ideas in [`morluto/rea`](https://github.com/morluto/rea), measured against it in [`raqib/docs/COMPARISON.md`](raqib/docs/COMPARISON.md). |
+
 ## Documentation
 
 | File | What is in it |

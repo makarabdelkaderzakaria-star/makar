@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Raqib — reverse engineering observatory</title>
+<link rel="stylesheet" href="/app.css" />
+</head>
+<body>
+<div class="grain" aria-hidden="true"></div>
+<div class="vignette" aria-hidden="true"></div>
+
+<header class="masthead">
+  <div class="masthead__scan" aria-hidden="true"></div>
+  <div class="wordmark reveal" style="--d:0ms">
+    <span class="wordmark__mark">RAQIB</span>
+    <span class="wordmark__sub">reverse&nbsp;engineering&nbsp;observatory</span>
+  </div>
+  <dl class="masthead__meta reveal" style="--d:90ms">
+    <div><dt>build</dt><dd id="build">0.1.0</dd></div>
+    <div><dt>network</dt><dd class="ok">none</dd></div>
+    <div><dt>runtime</dt><dd id="runtime">—</dd></div>
+  </dl>
+  <p class="masthead__tag reveal" style="--d:180ms">Evidence first. Every claim carries its location; every gap is printed, not hidden.</p>
+</header>
+
+<main class="deck">
+  <aside class="rail">
+    <section class="panel panel--target reveal" style="--d:240ms">
+      <h2 class="panel__title"><span class="tick">01</span> Target</h2>
+      <label class="field">
+        <span class="field__label">path on this machine</span>
+        <input id="target" type="text" spellcheck="false" placeholder="/usr/lib/brave-browser" />
+      </label>
+      <div class="chips" role="group" aria-label="analysis kind">
+        <button class="chip is-active" data-kind="auto">auto</button>
+        <button class="chip" data-kind="elf">elf</button>
+        <button class="chip" data-kind="pe">pe</button>
+        <button class="chip" data-kind="js">js</button>
+        <button class="chip" data-kind="chromium">chromium</button>
+        <button class="chip" data-kind="browser">browser</button>
+        <button class="chip" data-kind="asar">asar</button>
+        <button class="chip" data-kind="strings">strings</button>
+      </div>
+      <button id="analyze" class="lever">
+        <span class="lever__label">run analysis</span>
+        <span class="lever__hint">⏎</span>
+      </button>
+      <p class="hint" id="target-hint">Pick a binary, an application directory, a Chromium checkout or an .asar archive.</p>
+    </section>
+
+    <section class="panel panel--search reveal" style="--d:320ms">
+      <h2 class="panel__title"><span class="tick">02</span> Search</h2>
+      <label class="field">
+        <span class="field__label">pattern</span>
+        <input id="pattern" type="text" spellcheck="false" placeholder="contextBridge" />
+      </label>
+      <div class="chips">
+        <button class="chip is-active" id="regex-toggle">regex</button>
+        <button class="chip" id="case-toggle">case</button>
+      </div>
+      <button id="search" class="lever lever--quiet">
+        <span class="lever__label">search tree</span>
+        <span class="lever__hint">/</span>
+      </button>
+      <div id="results" class="results" aria-live="polite"></div>
+    </section>
+
+    <section class="panel panel--ledger reveal" style="--d:400ms">
+      <h2 class="panel__title"><span class="tick">03</span> Ledger</h2>
+      <dl class="ledger">
+        <div><dt>files</dt><dd id="stat-files">—</dd></div>
+        <div><dt>facts</dt><dd id="stat-facts">—</dd></div>
+        <div><dt>locations</dt><dd id="stat-locations">—</dd></div>
+        <div><dt>unknowns</dt><dd id="stat-unknowns">—</dd></div>
+        <div><dt>elapsed</dt><dd id="stat-elapsed">—</dd></div>
+      </dl>
+    </section>
+  </aside>
+
+  <section class="canvas">
+    <div class="canvas__head reveal" style="--d:150ms">
+      <h1 class="canvas__title" id="evidence-kind">nothing analysed yet</h1>
+      <p class="canvas__subject" id="evidence-subject">the console is waiting for a target</p>
+      <div class="canvas__id" id="evidence-id" hidden>
+        <span class="stamp" id="evidence-stamp">unverified</span>
+        <code id="evidence-code"></code>
+      </div>
+    </div>
+
+    <p class="canvas__summary" id="evidence-summary">
+      Raqib reads binaries, application trees, archives and Chromium checkouts without
+      executing anything and without touching the network. Choose a target to begin.
+    </p>
+
+    <div class="canvas__body">
+      <section class="block reveal" style="--d:260ms" id="facts-block" hidden>
+        <h3 class="block__title">Facts</h3>
+        <dl class="facts" id="facts"></dl>
+      </section>
+
+      <section class="block reveal" style="--d:320ms" id="locations-block" hidden>
+        <h3 class="block__title">Locations</h3>
+        <ol class="locations" id="locations"></ol>
+      </section>
+
+      <section class="block reveal" style="--d:380ms" id="limits-block" hidden>
+        <h3 class="block__title">Not proven</h3>
+        <ul class="limits" id="limits"></ul>
+      </section>
+
+      <section class="block block--empty reveal" style="--d:200ms" id="empty-block">
+        <p class="empty">
+          No analysis yet. The ledger stays empty until a target is read —
+          Raqib never guesses, and never fills a gap with a plausible story.
+        </p>
+      </section>
+    </div>
+  </section>
+</main>
+
+<footer class="statusbar reveal" style="--d:460ms">
+  <span class="statusbar__dot" id="status-dot"></span>
+  <span id="status-text">idle</span>
+  <span class="statusbar__right">keys — ⏎ analyse · / search · esc clear</span>
+</footer>
+
+<script src="/app.js" type="module"></script>
+</body>
+</html>
