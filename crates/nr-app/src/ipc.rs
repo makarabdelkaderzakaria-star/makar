@@ -331,7 +331,11 @@ pub fn bind(path: &Path) -> io::Result<Listener> {
     // `incoming()` borrows the listener, so the iterator owns it instead.
     let mut sockets = listener;
     let connections = std::iter::from_fn(move || {
-        Some(sockets.accept().map(|(stream, _)| Box::new(stream) as Connection))
+        Some(
+            sockets
+                .accept()
+                .map(|(stream, _)| Box::new(stream) as Connection),
+        )
     });
     Ok(Box::new(connections))
 }
