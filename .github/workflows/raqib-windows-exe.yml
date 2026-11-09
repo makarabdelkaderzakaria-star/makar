@@ -113,7 +113,9 @@ jobs:
             -Exe "$env:RUNNER_TEMP\clean\Raqib.exe" `
             -Fixtures "$env:RUNNER_TEMP\fixtures" `
             -BraveDir $braveDir `
-            -ResultsPath "$env:RUNNER_TEMP\results.json"
+            -ResultsPath "$env:RUNNER_TEMP\results.json" `
+            -LogPath "$env:RUNNER_TEMP\logs\test.log" *>&1 |
+            Tee-Object -FilePath "$env:RUNNER_TEMP\logs\test-console.log"
           if (Test-Path -LiteralPath "$env:RUNNER_TEMP\results.json") {
             Get-Content -LiteralPath "$env:RUNNER_TEMP\results.json" -Raw |
               Out-File -FilePath "$env:GITHUB_STEP_SUMMARY" -Encoding utf8
@@ -137,14 +139,19 @@ jobs:
         if: always()
         shell: pwsh
         run: |
+          $ErrorActionPreference = 'Continue'
+          Start-Transcript -Path "$env:RUNNER_TEMP\logs\publish.log" | Out-Null
           $sha = (Get-FileHash -LiteralPath 'raqib\dist\Raqib.exe' -Algorithm SHA256).Hash.ToLower()
           Set-Content -Path 'raqib\dist\SHA256' -Value $sha -Encoding ascii
           Set-Content -Path 'raqib\dist\SHA256SUMS' -Value "$sha  Raqib.exe" -Encoding ascii
 
           # A draft release: the bytes come out of the workflow and can be
           # fetched, but nothing is published to the world.
-          $existing = gh api "repos/$env:GITHUB_REPOSITORY/releases" --paginate 2>$null |
-            ConvertFrom-Json | Where-Object { $_.tag_name -eq $env:RAQIB_TAG }
+          $existing = $null
+          try {
+            $all = gh api "repos/$env:GITHUB_REPOSITORY/releases" 2>$null | ConvertFrom-Json
+            $existing = @($all) | Where-Object { $_.tag_name -eq $env:RAQIB_TAG } | Select-Object -First 1
+          } catch { }
           if ($existing) {
             $release = $existing | Select-Object -First 1
             Write-Host "reusing release $($release.id)"
@@ -172,6 +179,7 @@ jobs:
             Upload-Asset -Path 'raqib\dist\results.json' -Name 'results.json'
           }
           Write-Host "published sha256: $sha"
+          Stop-Transcript | Out-Null
 
       - name: keep the results and the logs in the repository
         if: always()
