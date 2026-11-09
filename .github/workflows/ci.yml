@@ -4,6 +4,13 @@ on:
   push:
   pull_request:
 
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+
 jobs:
   # The Windows backend is cfg(windows) code developed on Linux. Type-check it
   # from a Linux runner so it can never silently rot again -- the first draft of
@@ -37,9 +44,6 @@ jobs:
       - name: clippy
         run: cargo clippy --all-targets -- -D warnings
       - name: test
-        run: cargo test --all
-      - name: test (windows target: pure types + policy checks)
-        if: matrix.os == 'windows-latest'
         run: cargo test --all
       - name: build release
         run: cargo build --release
