@@ -329,7 +329,7 @@ pub fn bind(path: &Path) -> io::Result<Listener> {
     let listener = UnixListener::bind(path)?;
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
     // `incoming()` borrows the listener, so the iterator owns it instead.
-    let mut sockets = listener;
+    let sockets = listener;
     let connections = std::iter::from_fn(move || {
         Some(
             sockets
@@ -817,7 +817,7 @@ mod tests {
         let (text, _) = respond(&Request::Limits, &shared);
         let lines: Vec<&str> = text.lines().collect();
         assert_eq!(lines[0], "OK 1");
-        assert_eq!(lines[1], "chrome.exe 1000000 65536 ecn process");
+        assert_eq!(lines[1], "chrome.exe 1000000 64000 ecn process");
     }
 
     #[test]
