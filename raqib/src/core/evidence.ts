@@ -80,7 +80,7 @@ export interface EvidenceInit {
 }
 
 /** Build an Evidence record with a content-derived id. */
-export function makeEvidence(init: EvidenceInit, producer = 'raqib/0.1.0'): Evidence {
+export function makeEvidence(init: EvidenceInit, producer = 'raqib/0.2.0'): Evidence {
   const facts = init.facts ?? [];
   const locations = init.locations ?? [];
   const metrics = init.metrics ?? [];

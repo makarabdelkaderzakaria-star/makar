@@ -3,6 +3,52 @@
 All notable changes to Raqib are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.2.0] — 2026-11-09
+
+### Added
+
+- **Source map resolution** — a version-3 reader with a base64 VLQ decoder.
+  It lists the original files a bundle was built from and maps positions in
+  both directions: a position in the bundle back to its original file, and an
+  original position forward into the bundle. A position on an unmapped line
+  falls back to the nearest preceding mapping and is marked approximate.
+- **Mach-O reader** — thin and universal binaries: header, load commands,
+  segments and sections, dynamic libraries, rpaths, UUID, entry point, symbol
+  table and the code signature blob.
+- **PE import hashing** — the classic import hash, so a binary can be
+  recognised by its imports alone.
+- **Evidence diffing** — `compare_analyses` compares two analyses and reports
+  the facts that were added, removed and changed, the locations that moved,
+  and the gaps that opened or closed.
+- **One dispatcher** — `core/analyze.ts` decides how a path is analysed for
+  the MCP server, the command line and the console alike.
+- **Manifest reader** — a `package.json` is read as structure: the name,
+  version, entry point, runtime and development dependencies, scripts,
+  binaries, the engines it demands and the Electron version it was built
+  against, wherever that version was declared.
+
+### Changed
+
+- The MCP `inspect_binary` tool now understands Mach-O as well as ELF and PE.
+- The command line gained `macho`, `map`, `compare` and `manifest`, plus
+  `--kind`, `--line`, `--column` and `--source`.
+- A `package.json` is now recognised on sight, so `raqib analyze` reports a
+  manifest instead of a list of strings.
+- A positional argument is now consumed when it is read, so `asar <file>
+  <entry>` reads the entry it was given.
+
+### Fixed
+
+- The source map VLQ decoder reported the number of values it read instead of
+  the number of characters, which truncated every multi-field segment.
+- Mach-O command identifiers above 2^31 were compared as signed integers and
+  never matched.
+- A positional argument was read but never consumed, so `compare left right`
+  compared `left` with itself and `asar file entry` ignored the entry.
+- A source map position on a line with no mapping now falls back to the
+  nearest preceding mapping and is marked as approximate, instead of
+  reporting nothing.
+
 ## [0.1.0] — 2026-11-09
 
 The first release: a light, offline reverse-engineering observatory.

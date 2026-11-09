@@ -8,22 +8,15 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { readFile, stat } from 'node:fs/promises';
 import { join, resolve, extname } from 'node:path';
-import { inspectElf } from '../core/elf.js';
-import { inspectPe } from '../core/pe.js';
-import { analyzeJsApplication, jsApplicationEvidence } from '../core/js.js';
-import { indexTree } from '../core/indexer.js';
 import { searchTree } from '../core/search.js';
-import { analyzeChromiumTree, chromiumTreeEvidence, identifyBrowser, browserIdentityEvidence } from '../core/chromium.js';
-import { inspectStrings } from '../core/strings.js';
-import { asarEvidence } from '../core/asar.js';
-import { walk } from '../core/util.js';
-import { makeEvidence, type Evidence } from '../core/evidence.js';
+import { analyzeTarget, type TargetKind } from '../core/analyze.js';
+import type { Evidence } from '../core/evidence.js';
 import uiHtml from './ui/index.html';
 import uiCss from './ui/app.css';
 import uiJs from './ui/app.ui.js';
 import { fonts } from 'virtual:fonts';
 
-const VERSION = '0.1.0';
+const VERSION = '0.2.0';
 
 const FONT_FACES = `
 @font-face{font-family:'Bricolage';src:url(data:font/woff2;base64,${fonts.bricolage}) format('woff2');font-weight:200 800;font-display:swap;}
@@ -140,75 +133,8 @@ async function analyzePath(payload: Record<string, unknown>): Promise<Evidence> 
   const raw = String(payload.path ?? '').trim();
   if (!raw) throw new Error('a path is required');
   const target = resolve(raw);
-  const kind = String(payload.kind ?? 'auto');
-
-  const info = await stat(target);
-  if (info.isDirectory()) {
-    if (kind === 'chromium' || kind === 'auto') {
-      const entries = await walk(target);
-      const files = entries.filter((e) => !e.isDirectory);
-      const looksChromium = files.some((f) => f.rel.startsWith('chrome/') || f.rel.startsWith('content/'))
-        || files.some((f) => f.rel.endsWith('.gn') || f.rel.endsWith('DEPS'));
-      if (looksChromium && (kind === 'chromium' || files.length > 200)) {
-        return chromiumTreeEvidence(await analyzeChromiumTree(target));
-      }
-    }
-    if (kind === 'browser' || kind === 'auto') {
-      const entries = await walk(target, { maxDepth: 3 });
-      const hasExecutable = entries.some((e) => !e.isDirectory && e.size > 1_000_000 && extname(e.name) === '');
-      if (hasExecutable) return browserIdentityEvidence(await identifyBrowser(target));
-    }
-    if (kind === 'index' || kind === 'auto') {
-      const jsFiles = entriesHaveScripts(target);
-      if (!jsFiles && kind === 'auto') {
-        const index = await indexTree(target);
-        return makeEvidence({
-          kind: 'tree-index',
-          subject: target,
-          summary: `${index.fileCount} files, ${index.directoryCount} directories, ${index.totalBytes} bytes.`,
-          facts: [
-            { label: 'tree.files', value: String(index.fileCount) },
-            { label: 'tree.directories', value: String(index.directoryCount) },
-            { label: 'tree.bytes', value: String(index.totalBytes) },
-          ],
-          metrics: [{ label: 'tree.files', value: index.fileCount }],
-          limitations: ['Only directory metadata was read; no file contents were inspected.'],
-          data: index as unknown as Record<string, unknown>,
-        });
-      }
-    }
-    const entries = await walk(target);
-    const files = entries.filter((e) => !e.isDirectory).map((e) => ({ path: e.path, rel: e.rel, size: e.size }));
-    return jsApplicationEvidence(await analyzeJsApplication(target, files));
-  }
-
-  const buffer = await readFile(target);
-  if (kind === 'strings' || (kind === 'auto' && !isElf(buffer) && !isPe(buffer))) {
-    return (await inspectStrings(target, { maxStrings: 5000 })).evidence;
-  }
-  if (isElf(buffer)) return (await inspectElf(target)).evidence;
-  if (isPe(buffer)) return (await inspectPe(target)).evidence;
-  if (kind === 'asar' || buffer.length > 16 && buffer.readUInt32LE(0) === 4) {
-    try {
-      return (await asarEvidence(target)).evidence;
-    } catch {
-      /* fall through to strings */
-    }
-  }
-  return (await inspectStrings(target, { maxStrings: 5000 })).evidence;
-}
-
-async function entriesHaveScripts(root: string): Promise<boolean> {
-  const entries = await walk(root, { maxDepth: 4 });
-  return entries.some((e) => !e.isDirectory && /\.(js|mjs|cjs|jsx|ts|tsx)$/i.test(e.rel));
-}
-
-function isElf(buffer: Buffer): boolean {
-  return buffer.length > 4 && buffer.readUInt32BE(0) === 0x7f454c46;
-}
-
-function isPe(buffer: Buffer): boolean {
-  return buffer.length > 0x40 && buffer[0] === 0x4d && buffer[1] === 0x5a;
+  const kind = String(payload.kind ?? 'auto') as TargetKind;
+  return analyzeTarget(target, kind);
 }
 
 function readBody(request: IncomingMessage): Promise<string> {

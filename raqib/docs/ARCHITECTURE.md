@@ -28,6 +28,11 @@ MCP, and nothing in the core layer knows about HTTP.
 | `core/searchWorker.ts` | the worker half of the search, reading files in parallel |
 | `core/chromium.ts` | Chromium-family trees (subsystems, GN arguments) and installed browsers (product, version, feature markers) |
 | `core/strings.ts` | printable string recovery, ASCII and UTF-16LE |
+| `core/macho.ts` | Mach-O: thin and universal binaries, load commands, dylibs, symbols |
+| `core/sourcemap.ts` | source map v3: VLQ decoding, and position mapping in both directions |
+| `core/diff.ts` | comparing two Evidence records field by field |
+| `core/analyze.ts` | the one place that decides how a path is analysed |
+| `core/manifest.ts` | package manifests, read as structure |
 | `core/evidence.ts` | the Evidence record and its content-derived identity |
 | `core/util.ts` | the directory walk, file classification, hashing, formatting |
 
@@ -133,6 +138,13 @@ One esbuild pass produces `dist/raqib.mjs` (the CLI, the MCP server and the
 console in one file) and `dist/searchWorker.mjs` (the search worker). The
 plugin in `scripts/build.mjs` inlines the UI as text and the fonts as base64.
 TypeScript is used for checking only; there is no runtime transpilation.
+
+## One dispatcher
+
+`core/analyze.ts` is the only place that decides what a path is and how it
+should be read. The MCP server, the command line and the console all call
+it, so a new format is supported in all three at once — and there is exactly
+one definition of "what does `auto` mean".
 
 ## Deliberate omissions
 

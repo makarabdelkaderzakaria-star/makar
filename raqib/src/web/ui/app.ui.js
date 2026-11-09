@@ -111,7 +111,8 @@ async function runAnalysis() {
   setStatus(`reading ${target}`, 'busy');
   const started = performance.now();
   try {
-    const { evidence } = await api('/api/analyze', { path: target, kind: state.kind });
+    const kind = state.kind === 'map' ? 'sourcemap' : state.kind;
+    const { evidence } = await api('/api/analyze', { path: target, kind });
     renderEvidence(evidence, performance.now() - started);
     setStatus(`analysed ${evidence.kind} in ${Math.round(performance.now() - started)} ms`);
   } catch (error) {

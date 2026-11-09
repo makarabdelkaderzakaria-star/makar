@@ -140,6 +140,43 @@ so an absent feature is not proof of an absent feature.
 Without `entry`: the archive manifest — every file, its size, its offset,
 whether it is executable or unpacked. With `entry`: that entry's contents.
 
+### `resolve_source_map`
+
+```jsonc
+{ "path": "/abs/dist/bundle.js", "line": 120, "column": 8 }
+{ "path": "/abs/dist/bundle.js", "source": "../src/app.ts", "line": 5 }
+```
+
+Reads the source map of a bundle (or a `.map` file directly) and lists the
+original files it was built from. With `line`/`column` it maps a position in
+the bundle back to its original file; with `source`/`line` it maps an
+original position forward into the bundle. When the exact line carries no
+mapping, the nearest preceding mapping is returned and marked as approximate.
+
+### `compare_analyses`
+
+```jsonc
+{ "left":  { "path": "/abs/old-build", "kind": "auto" },
+  "right": { "path": "/abs/new-build", "kind": "auto" } }
+```
+
+Analyses both sides (or reuses two evidence ids from this session) and
+reports what changed: facts added, removed and changed; locations added and
+removed; limitations opened and closed. The result is itself an Evidence
+record, so it can be stored and compared again.
+
+### `inspect_manifest`
+
+```jsonc
+{ "path": "/abs/app/package.json" }
+```
+
+Reads a package manifest as structure rather than as text: the name, version,
+entry point, runtime and development dependencies, scripts, binaries, the
+engines it demands, and the Electron version it was built against. A JSON
+file that is not a manifest is described by its top-level keys instead, and
+says so.
+
 ### `get_evidence`
 
 ```jsonc

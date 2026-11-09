@@ -17,12 +17,17 @@ import { searchTree } from './core/search.js';
 import { analyzeChromiumTree, chromiumTreeEvidence, identifyBrowser, browserIdentityEvidence, browserSearchPaths } from './core/chromium.js';
 import { inspectStrings } from './core/strings.js';
 import { asarEvidence, readAsarFile, readAsarManifest } from './core/asar.js';
+import { inspectMacho } from './core/macho.js';
+import { readSourceMap, sourceMapEvidence, originalPositionFor, generatedPositionFor } from './core/sourcemap.js';
+import { analyzeTarget, type TargetKind } from './core/analyze.js';
+import { diffEvidence, diffEvidenceRecord } from './core/diff.js';
+import { manifestEvidence } from './core/manifest.js';
 import { walk, formatBytes, formatDuration } from './core/util.js';
 import { runMcpServer, renderEvidenceText, TOOLS } from './mcp/server.js';
 import { startConsole } from './web/server.js';
 import type { Evidence } from './core/evidence.js';
 
-const VERSION = '0.1.0';
+const VERSION = '0.2.0';
 
 interface Flags {
   json: boolean;
@@ -34,6 +39,10 @@ interface Flags {
   max: number;
   context: number;
   depth: number;
+  kind: TargetKind;
+  line: number | null;
+  column: number | null;
+  source: string | null;
   out: string | null;
   positional: string[];
   help: boolean;
@@ -43,6 +52,7 @@ function parseFlags(argv: string[]): Flags {
   const flags: Flags = {
     json: false, quiet: false, port: 8787, host: '127.0.0.1',
     regex: false, caseSensitive: false, max: 200, context: 0, depth: 64,
+    kind: 'auto', line: null, column: null, source: null,
     out: null, positional: [], help: false,
   };
   for (let i = 0; i < argv.length; i += 1) {
@@ -59,11 +69,19 @@ function parseFlags(argv: string[]): Flags {
       case '--max': flags.max = Number(next()); break;
       case '--context': flags.context = Number(next()); break;
       case '--depth': flags.depth = Number(next()); break;
+      case '--kind': flags.kind = next() as TargetKind; break;
+      case '--line': flags.line = Number(next()); break;
+      case '--column': flags.column = Number(next()); break;
+      case '--source': flags.source = next(); break;
       case '--out': flags.out = next(); break;
       default:
         if (arg.startsWith('--max=')) flags.max = Number(arg.slice(6));
         else if (arg.startsWith('--port=')) flags.port = Number(arg.slice(7));
         else if (arg.startsWith('--out=')) flags.out = arg.slice(6);
+        else if (arg.startsWith('--kind=')) flags.kind = arg.slice(7) as TargetKind;
+        else if (arg.startsWith('--line=')) flags.line = Number(arg.slice(7));
+        else if (arg.startsWith('--column=')) flags.column = Number(arg.slice(9));
+        else if (arg.startsWith('--source=')) flags.source = arg.slice(9);
         else if (arg.startsWith('-')) { /* unknown flag: ignore */ }
         else flags.positional.push(arg);
     }
@@ -80,6 +98,10 @@ COMMANDS
   mcp                       run the MCP server on stdio (for agent clients)
   serve                     start the local analysis console in the browser
   analyze <path>            inspect anything: binary, directory, app or archive
+  macho <file>              read a Mach-O image: segments, dylibs, symbols
+  map <bundle>              read a source map and resolve positions
+  compare <left> <right>    diff two analyses of the same kind of target
+  manifest <file>           read a package manifest: name, entry, dependencies
   elf <file>                read an ELF image: sections, symbols, hardening
   pe <file>                 read a PE image: imports, exports, certificate, hardening
   js <dir>                  analyse a JavaScript / Electron application
@@ -102,6 +124,10 @@ FLAGS
   --max <n>                 maximum results (default 200)
   --context <n>             lines of context around a match
   --depth <n>               maximum directory depth
+  --kind <k>                analysis kind for analyze/compare
+  --line <n>                line to resolve in a source map
+  --column <n>              column to resolve in a source map
+  --source <path>           original source to look for in a bundle
   --port <n>                console port (default 8787)
   --host <addr>             console host (default 127.0.0.1)
   --quiet, -q               no human-readable output
@@ -111,6 +137,8 @@ EXAMPLES
   raqib search ./src "contextBridge" --context 2
   raqib chromium ~/src/brave-core --json > brave.json
   raqib setup claude
+  raqib compare ./old-app ./new-app
+  raqib manifest ./app/package.json
 `;
 
 async function main(): Promise<number> {
@@ -136,6 +164,14 @@ async function main(): Promise<number> {
       return doctor(flags);
     case 'analyze':
       return analyze(flags);
+    case 'macho':
+      return machoCommand(flags);
+    case 'map':
+      return mapCommand(flags);
+    case 'compare':
+      return compareCommand(flags);
+    case 'manifest':
+      return manifestCommand(flags);
     case 'elf':
       return elfCommand(flags);
     case 'pe':
@@ -301,63 +337,87 @@ async function browserCommand(flags: Flags): Promise<number> {
 /** Inspect anything: dispatch on what the path actually is. */
 async function analyze(flags: Flags): Promise<number> {
   const path = requirePositional(flags, 'path');
-  const info = await stat(path);
-
-  if (info.isDirectory()) {
-    const entries = await walk(path);
-    const files = entries.filter((e) => !e.isDirectory);
-
-    // A Chromium source tree gets the Chromium map; anything else gets the
-    // JavaScript application analysis.
-    const looksChromium = files.some((f) => f.rel.startsWith('chrome/') || f.rel.startsWith('content/'))
-      || files.some((f) => f.rel.endsWith('.gn') || f.rel.endsWith('DEPS'));
-
-    if (looksChromium && files.length > 200) {
-      const analysis = await analyzeChromiumTree(path);
-      emitEvidence(flags, chromiumTreeEvidence(analysis));
-      return 0;
-    }
-
-    const jsFiles = files.filter((f) => /\.(js|mjs|cjs|jsx|ts|tsx)$/i.test(f.rel));
-    if (jsFiles.length > 0) {
-      const analysis = await analyzeJsApplication(path, files.map((e) => ({ path: e.path, rel: e.rel, size: e.size })));
-      emitEvidence(flags, jsApplicationEvidence(analysis));
-      return 0;
-    }
-
-    const index = await indexTree(path);
-    const human = [
-      formatIndexSummary(index),
-      '',
-      'Languages:',
-      ...index.languages.slice(0, 20).map((l) => `  ${l.language.padEnd(12)} ${String(l.files).padStart(7)} files  ${formatBytes(l.bytes).padStart(10)}`),
-    ].join('\n');
-    emit(flags, index, human);
-    return 0;
-  }
-
-  const buffer = await readFile(path);
-  if (buffer.length > 4 && buffer.readUInt32BE(0) === 0x7f454c46) {
-    const { evidence } = await inspectElf(path);
-    emitEvidence(flags, evidence);
-    return 0;
-  }
-  if (buffer.length > 0x40 && buffer[0] === 0x4d && buffer[1] === 0x5a) {
-    const { evidence } = await inspectPe(path);
-    emitEvidence(flags, evidence);
-    return 0;
-  }
-  if (buffer.length > 16 && buffer.readUInt32LE(0) === 4) {
-    try {
-      const { evidence } = await asarEvidence(path);
-      emitEvidence(flags, evidence);
-      return 0;
-    } catch {
-      // not an asar after all
-    }
-  }
-  const { evidence } = await inspectStrings(path, { maxStrings: flags.max * 10 });
+  const evidence = await analyzeTarget(path, flags.kind);
   emitEvidence(flags, evidence);
+  return 0;
+}
+
+async function manifestCommand(flags: Flags): Promise<number> {
+  const path = requirePositional(flags, 'manifest.json');
+  emitEvidence(flags, await manifestEvidence(path));
+  return 0;
+}
+
+async function machoCommand(flags: Flags): Promise<number> {
+  const path = requirePositional(flags, 'file');
+  const { evidence } = await inspectMacho(path);
+  emitEvidence(flags, evidence);
+  return 0;
+}
+
+async function mapCommand(flags: Flags): Promise<number> {
+  const path = requirePositional(flags, 'bundle');
+  const report = await readSourceMap(path);
+  const evidence = sourceMapEvidence(report);
+  let resolution: string | null = null;
+
+  if (report.map && flags.line !== null && !flags.source) {
+    const original = originalPositionFor(report.map, { line: flags.line, column: Math.max(0, (flags.column ?? 1) - 1) });
+    if (original) {
+      resolution = `${path}:${flags.line}:${flags.column ?? 1}  ->  ${original.source}:${original.line}:${original.column}`;
+      evidence.locations.unshift({
+        file: original.source,
+        line: original.line,
+        column: original.column,
+        note: 'the original source of the requested position',
+      });
+    }
+  } else if (report.map && flags.source && flags.line !== null) {
+    const generated = generatedPositionFor(report.map, { source: flags.source, line: flags.line, column: flags.column ?? undefined });
+    if (generated) {
+      resolution = `${flags.source}:${flags.line}  ->  ${path}:${generated.line}:${generated.column}`;
+    }
+  }
+
+  const human = [
+    renderEvidenceText(evidence),
+    '',
+    resolution ? `resolution: ${resolution}` : 'resolution: not requested or not resolvable',
+    '',
+    'Original sources:',
+    ...report.originalSources.slice(0, 100).map((s) => `  ${s.hasContent ? '*' : '-'} ${s.path}`),
+    '  (* source is embedded in the map, - source is not embedded)',
+  ].join('\n');
+  emit(flags, { ...evidence, resolution }, human);
+  return 0;
+}
+
+async function compareCommand(flags: Flags): Promise<number> {
+  const leftPath = requirePositional(flags, 'left');
+  const rightPath = flags.positional[0];
+  if (!rightPath) {
+    process.stderr.write('raqib: compare needs two paths\n');
+    return 2;
+  }
+  const left = await analyzeTarget(leftPath, flags.kind);
+  const right = await analyzeTarget(rightPath, flags.kind);
+  const diff = diffEvidence(left, right);
+  const evidence = diffEvidenceRecord(diff, `${left.subject} <-> ${right.subject}`);
+
+  const human = [
+    evidence.summary,
+    '',
+    `left  : ${left.id}  ${left.subject}`,
+    `right : ${right.id}  ${right.subject}`,
+    '',
+    ...diff.facts.changed.map((c) => `  ~ ${c.label}: ${c.before}  ->  ${c.after}`),
+    ...diff.facts.added.map((f) => `  + ${f.label}: ${f.value}`),
+    ...diff.facts.removed.map((f) => `  - ${f.label}: ${f.value}`),
+    '',
+    ...diff.limitations.added.map((l) => `  ! new gap: ${l}`),
+    ...diff.limitations.removed.map((l) => `  gap closed: ${l}`),
+  ].join('\n');
+  emit(flags, evidence, human);
   return 0;
 }
 
@@ -468,8 +528,9 @@ async function doctor(flags: Flags): Promise<number> {
   return checks.every((c) => c.ok) ? 0 : 1;
 }
 
+/** Take the next positional argument and consume it. */
 function requirePositional(flags: Flags, name: string): string {
-  const value = flags.positional[0];
+  const value = flags.positional.shift();
   if (!value) {
     process.stderr.write(`raqib: missing <${name}>\n`);
     process.exit(2);

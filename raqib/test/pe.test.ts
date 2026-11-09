@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { parsePe } from '../src/core/pe.js';
+import { createHash } from 'node:crypto';
 import { buildPe } from './fixtures/pe.js';
 
 test('parses a PE32+ image', () => {
@@ -44,6 +45,18 @@ test('reads the Authenticode certificate table', () => {
     analysis.limitations.some((l) => l.includes('not cryptographically verified')),
     'the signature is not claimed to be verified',
   );
+});
+
+test('computes the import hash', () => {
+  const { buffer } = buildPe();
+  const analysis = parsePe(buffer, 'sample.exe');
+
+  // kernel32.createfilew + kernel32.closehandle, lower-cased and concatenated.
+  const expected = createHash('md5')
+    .update('kernel32.createfilewkernel32.closehandle', 'utf8')
+    .digest('hex');
+  assert.equal(analysis.imphash, expected);
+  assert.match(analysis.imphash, /^[0-9a-f]{32}$/);
 });
 
 test('reads the hardening flags', () => {

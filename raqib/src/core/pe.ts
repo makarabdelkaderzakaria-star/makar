@@ -6,6 +6,7 @@
  * bits that express ASLR, DEP, CFG and high-entropy ASLR.
  */
 import { readFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import { makeEvidence, type Evidence, type Fact } from './evidence.js';
 
 const MACHINE_NAMES: Record<number, string> = {
@@ -63,6 +64,8 @@ export interface PeAnalysis {
   imports: PeImport[];
   exports: PeExport;
   certificate: { size: number; revision: string; type: string } | null;
+  /** The classic import hash: a fingerprint of the import table alone. */
+  imphash: string;
   dataDirectories: Array<{ name: string; rva: number; size: number }>;
   hardening: {
     aslr: boolean;
@@ -253,6 +256,16 @@ export function parsePe(buf: Buffer, path = '<memory>'): PeAnalysis {
     };
   }
 
+  // The classic import hash: the lower-cased "dll.function" pairs of every
+  // named import, concatenated in order, hashed with MD5. Two binaries that
+  // import the same things get the same hash, whatever else they contain.
+  const imphashInput = imports
+    .flatMap((entry) => entry.functions
+      .filter((name) => !name.startsWith('#'))
+      .map((name) => `${entry.dll.replace(/\.dll$/i, '').toLowerCase()}.${name.toLowerCase()}`))
+    .join('');
+  const imphash = createHash('md5').update(imphashInput, 'utf8').digest('hex');
+
   const characteristicNames = CHARACTERISTIC_FLAGS
     .filter(([bit]) => (characteristics & bit) !== 0)
     .map(([, name]) => name);
@@ -274,6 +287,7 @@ export function parsePe(buf: Buffer, path = '<memory>'): PeAnalysis {
     imports,
     exports: exportInfo,
     certificate,
+    imphash,
     dataDirectories,
     hardening: {
       aslr: (dllCharacteristics & 0x0040) !== 0,
@@ -341,6 +355,7 @@ export async function inspectPe(path: string): Promise<{ analysis: PeAnalysis; e
   push('pe.exported_functions', analysis.exports.functions.length);
   push('pe.export_name', analysis.exports.name ?? 'none');
   push('pe.certificate', analysis.certificate ? `${analysis.certificate.type} (${analysis.certificate.size} bytes)` : 'none');
+  push('pe.imphash', analysis.imphash);
   push('pe.timestamp', new Date(analysis.timestamp * 1000).toISOString());
   push('hardening.aslr', analysis.hardening.aslr);
   push('hardening.high_entropy_aslr', analysis.hardening.highEntropyAslr);
@@ -373,6 +388,7 @@ export async function inspectPe(path: string): Promise<{ analysis: PeAnalysis; e
       imports: analysis.imports,
       exports: analysis.exports,
       certificate: analysis.certificate,
+      imphash: analysis.imphash,
       hardening: analysis.hardening,
     },
   });

@@ -10,6 +10,7 @@ import { readFile } from 'node:fs/promises';
 import { basename } from 'node:path';
 import { inspectElf, parseElf } from '../core/elf.js';
 import { inspectPe, parsePe } from '../core/pe.js';
+import { inspectMacho } from '../core/macho.js';
 import { analyzeJsApplication, jsApplicationEvidence } from '../core/js.js';
 import { indexTree } from '../core/indexer.js';
 import { searchTree } from '../core/search.js';
@@ -17,10 +18,14 @@ import { analyzeChromiumTree, chromiumTreeEvidence, identifyBrowser, browserIden
 import { inspectStrings } from '../core/strings.js';
 import { asarEvidence, readAsarFile, readAsarManifest } from '../core/asar.js';
 import { walk } from '../core/util.js';
+import { analyzeTarget, isElf, isMachoFile, isPe, type TargetKind } from '../core/analyze.js';
+import { readSourceMap, originalPositionFor, generatedPositionFor, sourceMapEvidence } from '../core/sourcemap.js';
+import { diffEvidence, diffEvidenceRecord } from '../core/diff.js';
+import { manifestEvidence } from '../core/manifest.js';
 import { makeEvidence, type Evidence } from '../core/evidence.js';
 
 export const SERVER_NAME = 'raqib';
-export const SERVER_VERSION = '0.1.0';
+export const SERVER_VERSION = '0.2.0';
 const DEFAULT_PROTOCOL = '2025-06-18';
 const KNOWN_PROTOCOLS = new Set(['2024-11-05', '2025-03-26', '2025-06-18']);
 
@@ -141,6 +146,65 @@ export const TOOLS: ToolDefinition[] = [
     },
   },
   {
+    name: 'resolve_source_map',
+    description:
+      'Resolve a source map: list the original files a bundle was built from, map a position in ' +
+      'the bundle back to its original file, or find where an original position ended up in the bundle.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: 'Absolute path to the bundle (.js) or to its .map file.' },
+        line: { type: 'number', description: 'Line in the generated file (1-based).' },
+        column: { type: 'number', description: 'Column in the generated file (1-based).' },
+        source: { type: 'string', description: 'An original source path, to locate it in the bundle.' },
+      },
+      required: ['path'],
+    },
+  },
+  {
+    name: 'compare_analyses',
+    description:
+      'Compare two analyses of the same kind of target and report exactly what changed: facts added, ' +
+      'removed and changed, locations moved, and gaps opened or closed.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        left: {
+          type: 'object',
+          description: 'The first side: an absolute path to analyse, or an evidence id from this session.',
+          properties: {
+            path: { type: 'string' },
+            id: { type: 'string' },
+            kind: { type: 'string', description: 'auto, elf, pe, macho, js, asar, chromium, browser, strings, index, sourcemap, manifest' },
+          },
+        },
+        right: {
+          type: 'object',
+          description: 'The second side: an absolute path to analyse, or an evidence id from this session.',
+          properties: {
+            path: { type: 'string' },
+            id: { type: 'string' },
+            kind: { type: 'string', description: 'auto, elf, pe, macho, js, asar, chromium, browser, strings, index, sourcemap, manifest' },
+          },
+        },
+      },
+      required: ['left', 'right'],
+    },
+  },
+  {
+    name: 'inspect_manifest',
+    description:
+      'Read a package manifest (package.json): the name, version, entry point, dependencies, ' +
+      'scripts, engines and Electron build settings an application declares.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: 'Absolute path to the manifest (package.json).' },
+      },
+      required: ['path'],
+    },
+  },
+  {
     name: 'get_evidence',
     description: 'Return a previously produced Evidence record by its id.',
     inputSchema: {
@@ -239,6 +303,12 @@ export class RaqibMcpServer {
         return this.identifyBrowser(args);
       case 'read_asar':
         return this.readAsar(args);
+      case 'inspect_manifest':
+        return this.inspectManifest(args);
+      case 'resolve_source_map':
+        return this.resolveSourceMap(args);
+      case 'compare_analyses':
+        return this.compareAnalyses(args);
       case 'get_evidence':
         return this.getEvidence(args);
       default:
@@ -258,10 +328,8 @@ export class RaqibMcpServer {
   private async inspectBinary(args: Record<string, unknown>): Promise<ToolResult> {
     const path = requireString(args, 'path');
     const buffer = await readFile(path);
-    const isElf = buffer.length > 4 && buffer.readUInt32BE(0) === 0x7f454c46;
-    const isPe = buffer.length > 0x40 && buffer[0] === 0x4d && buffer[1] === 0x5a;
 
-    if (isElf) {
+    if (isElf(buffer)) {
       const { evidence } = await inspectElf(path);
       this.remember(evidence);
       if (args.strings !== false) {
@@ -271,12 +339,17 @@ export class RaqibMcpServer {
       }
       return toToolResult(evidence);
     }
-    if (isPe) {
+    if (isPe(buffer)) {
       const { evidence } = await inspectPe(path);
       this.remember(evidence);
       return toToolResult(evidence);
     }
-    throw new Error(`${path} is neither an ELF nor a PE image`);
+    if (isMachoFile(buffer)) {
+      const { evidence } = await inspectMacho(path);
+      this.remember(evidence);
+      return toToolResult(evidence);
+    }
+    throw new Error(`${path} is not an ELF, PE or Mach-O image`);
   }
 
   private async analyzeApplication(args: Record<string, unknown>): Promise<ToolResult> {
@@ -401,6 +474,82 @@ export class RaqibMcpServer {
     });
     this.remember(evidence);
     return toToolResult(evidence);
+  }
+
+  private async resolveSourceMap(args: Record<string, unknown>): Promise<ToolResult> {
+    const path = requireString(args, 'path');
+    const report = await readSourceMap(path);
+
+    const line = typeof args.line === 'number' ? args.line : null;
+    const column = typeof args.column === 'number' ? args.column : null;
+    const source = typeof args.source === 'string' ? args.source : null;
+
+    let resolution: Record<string, unknown> | null = null;
+    if (report.map && line !== null) {
+      const original = originalPositionFor(report.map, { line, column: Math.max(0, (column ?? 1) - 1) });
+      if (original) {
+        resolution = {
+          direction: 'generated-to-original',
+          generated: { line, column },
+          original,
+        };
+      }
+    } else if (report.map && source !== null && line !== null) {
+      const generated = generatedPositionFor(report.map, { source, line, column: column ?? undefined });
+      if (generated) {
+        resolution = { direction: 'original-to-generated', original: { source, line, column }, generated };
+      }
+    }
+
+    const evidence = sourceMapEvidence(report);
+    evidence.facts.push({
+      label: 'sourcemap.resolution',
+      value: resolution ? JSON.stringify(resolution) : 'not requested or not resolvable',
+    });
+    if (resolution) {
+      const original = (resolution as Record<string, unknown>).original as Record<string, unknown> | undefined;
+      if (original?.source) {
+        evidence.locations.unshift({
+          file: String(original.source),
+          line: typeof original.line === 'number' ? original.line : undefined,
+          column: typeof original.column === 'number' ? original.column : undefined,
+          note: 'the original source of the requested position',
+        });
+      }
+    }
+    this.remember(evidence);
+    return toToolResult(evidence);
+  }
+
+  private async inspectManifest(args: Record<string, unknown>): Promise<ToolResult> {
+    const path = requireString(args, 'path');
+    const evidence = await manifestEvidence(path);
+    this.remember(evidence);
+    return toToolResult(evidence);
+  }
+
+  private async compareAnalyses(args: Record<string, unknown>): Promise<ToolResult> {
+    const left = await this.resolveSide(args.left, 'left');
+    const right = await this.resolveSide(args.right, 'right');
+    const diff = diffEvidence(left, right);
+    const evidence = diffEvidenceRecord(diff, `${left.subject} ↔ ${right.subject}`);
+    this.remember(evidence);
+    return toToolResult(evidence);
+  }
+
+  /** One side of a comparison: a path to analyse, or an id from this session. */
+  private async resolveSide(value: unknown, side: string): Promise<Evidence> {
+    const spec = (value ?? {}) as { path?: string; id?: string; kind?: string };
+    if (typeof spec.id === 'string' && spec.id) {
+      const cached = this.evidence.get(spec.id);
+      if (!cached) throw new Error(`no evidence with id ${spec.id} in this session`);
+      return cached;
+    }
+    if (typeof spec.path !== 'string' || !spec.path) {
+      throw new Error(`"${side}" needs either a path to analyse or an evidence id`);
+    }
+    const kind = (spec.kind ?? 'auto') as TargetKind;
+    return analyzeTarget(spec.path, kind);
   }
 
   private async getEvidence(args: Record<string, unknown>): Promise<ToolResult> {

@@ -30,10 +30,13 @@ result.
 
 ## Formats it does not read
 
-Mach-O, .NET assemblies, WASM, EVM bytecode, DEX, APK, PyInstaller, Deno
-compile output, SQLite, firmware images, crash dumps, HAR/SAZ captures,
-PDF, and images are all out of scope for 0.1. Strings can still be recovered
-from any of them with `raqib strings`.
+.NET assemblies, WASM, EVM bytecode, DEX, APK, PyInstaller, Deno compile
+output, SQLite, firmware images, crash dumps, HAR/SAZ captures, PDF, and
+images are all out of scope. Strings can still be recovered from any of them
+with `raqib strings`.
+
+Mach-O is read for its structure, but not deeply: there is no disassembly, no
+Objective-C class metadata, and no Swift type reflection.
 
 ## The Chromium map is name-driven
 
@@ -50,6 +53,20 @@ compiled in. A feature that was compiled out leaves no marker, and a
 feature that is present but disabled at runtime looks identical to one that is
 enabled. `none detected` means *no marker was found*, not *the feature is
 absent*.
+
+## A manifest is a claim
+
+`package.json` records what somebody intended to build. The dependency
+versions in it are the versions that were *asked for*, not the versions that
+are installed or vendored, and the entry point it names may not be the file
+the application actually loads.
+
+## Source maps are read, not trusted
+
+The map is a claim made by the build, not a proof. A map can name files that
+do not exist, or map positions wrongly. Raqib reports the map's own claims
+and marks a resolution as *approximate* when it had to fall back to the
+nearest preceding mapping.
 
 ## The JavaScript scanner is a lexer, not a parser
 
