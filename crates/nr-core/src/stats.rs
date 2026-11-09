@@ -49,6 +49,8 @@ pub struct Counters {
     pub dropped_quota: u64,
     /// Dropped because a limit's byte budget (cap) is spent for this period.
     pub dropped_cap: u64,
+    /// Forwarded with the CE codepoint set instead of being delayed or dropped.
+    pub marked_ecn: u64,
     /// Dropped as unparseable (still forwarded; counted for visibility).
     pub dropped_malformed: u64,
     /// New flow rows created.
@@ -109,6 +111,8 @@ pub struct Snapshot {
     pub dropped_quota: u64,
     /// See [`Counters::dropped_cap`].
     pub dropped_cap: u64,
+    /// See [`Counters::marked_ecn`].
+    pub marked_ecn: u64,
     /// Live flows.
     pub flows: u64,
     /// Flow table capacity.
@@ -218,6 +222,7 @@ impl Counters {
             dropped_budget: self.dropped_budget,
             dropped_quota: self.dropped_quota,
             dropped_cap: self.dropped_cap,
+            marked_ecn: self.marked_ecn,
             flows: flows.len() as u64,
             flows_capacity: flows.capacity() as u64,
             retained_bytes: scheduler.held_bytes(),

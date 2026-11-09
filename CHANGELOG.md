@@ -4,6 +4,17 @@
 
 ### Added
 
+* **ECN marking (`policy ecn`).** Instead of delaying or dropping an over-limit
+  packet, set the CE codepoint and forward it, so the sender halves its window
+  without a retransmission. Only ECT(0)/ECT(1) frames are marked — `Not-ECT`
+  falls back to shaping, never to a silent drop — the IPv4 checksum is repaired
+  incrementally (RFC 1624), IPv6 needs no checksum work, frames that cannot be
+  parsed are left untouched, and an already-CE packet is not recomputed. The
+  engine returns `Decision::MarkEcn`; the I/O layer performs the rewrite.
+  `Snapshot::marked_ecn` counts it. Tests: both codepoints, options in the
+  header, the checksum still validating, `Not-ECT` unchanged byte for byte,
+  already-CE untouched, IPv6 traffic class with DSCP preserved, garbage and
+  truncated frames refused, and the engine's fallback to shaping.
 * **CoDel queue management (`param codel = 5ms`).** A byte budget bounds how
   much is held but not how long it stands: a queue that is always 200 ms deep
   drops nothing and makes everything feel slow. `Codel` (RFC 8289) now watches

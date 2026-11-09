@@ -109,6 +109,9 @@ param batch-max = 64
 # policy shape         delay packets until they fit (no retransmissions)
 # policy drop          drop over-limit packets (TCP retransmits: wasteful)
 # policy drop-inbound  drop inbound packets instead (the peer slows down)
+# policy ecn           mark the packet CE and forward it, but only when the
+#                      transport negotiated ECN; anything else is shaped. The
+#                      sender halves its window without a retransmission.
 #
 # per-flow             one bucket per connection instead of one per process.
 #                      A browser with one tab on a 4K stream no longer starves
@@ -125,7 +128,7 @@ param batch-max = 64
 #                      dropped until the period rolls over; the counter is
 #                      kept in <config>.caps so a restart does not refund it.
 #
-limit chrome.exe  = 8mbit   burst 64kb
+limit chrome.exe  = 8mbit   burst 64kb policy ecn
 limit steam.exe   = 20mbit  burst 256kb schedule 08:00-18:00
 limit backup.exe  = 2mbit   burst 32kb policy drop cap 20gb/month
 limit browser.exe = 8mbit   burst 64kb per-flow

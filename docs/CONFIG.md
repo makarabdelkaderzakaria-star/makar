@@ -83,6 +83,7 @@ limit updater.exe = 20mbit  burst 256kb schedule 22:00-06:00
 | `shape` *(default)* | delay packets until they fit | **1×** — nothing is ever retransmitted |
 | `drop` | drop over-limit outbound packets | 2× — TCP retransmits them |
 | `drop-inbound` | drop over-limit inbound packets | ~1× — the peer sees a zero window and slows down |
+| `ecn` | mark over-limit packets CE and forward them | **1×** — the sender halves its window without a retransmission |
 
 * `per-flow` (or `scope flow`): one bucket **per connection** instead of one
   per process. A browser downloading a 4K stream no longer starves its own DNS
@@ -90,6 +91,30 @@ limit updater.exe = 20mbit  burst 256kb schedule 22:00-06:00
   The cost is one `u64` in the flow table row that already exists — no second
   table, no allocation. `scope process` is the default and is what every
   previous version did.
+
+### ECN marking: `policy ecn`
+
+When the transport negotiated ECN (both ends set ECT in the IP header), the
+congestion signal does not have to cost a packet: set the CE codepoint, forward
+it, and the receiver echoes it back so the sender halves its window without
+retransmitting anything.
+
+```text
+limit chrome.exe = 8mbit burst 64kb policy ecn
+```
+
+* Only **ECT(0)/ECT(1)** packets are marked. A `Not-ECT` packet has no way to
+  carry the signal, so it falls back to shaping — never to a silent drop, and
+  never to a corrupted header.
+* The IPv4 header checksum is repaired incrementally (RFC 1624); IPv6 needs no
+  checksum change. Frames this program cannot parse are left byte-for-byte
+  untouched.
+* An already-CE packet is not recomputed and not counted twice.
+* `snapshot.marked_ecn` counts the marks, and `netrocket tui` shows them; the
+  engine only *decides* to mark, the I/O layer performs the rewrite.
+* Requires an ECN-capable peer. On a network that strips the ECT bits the limit
+  degrades to ordinary shaping, which is the point: the failure mode is "slower"
+  rather than "broken".
 
 ### Time-of-day schedules: `schedule <window>`
 
@@ -202,7 +227,7 @@ param max-retain   = 250ms
 param retain-budget = 2mb
 param codel        = 5ms
 
-limit chrome.exe = 8mbit  burst 64kb
+limit chrome.exe = 8mbit  burst 64kb policy ecn
 limit steam.exe  = 20mbit burst 256kb
 limit backup.exe = 2mbit  burst 32kb policy drop
 limit browser.exe = 8mbit burst 64kb per-flow

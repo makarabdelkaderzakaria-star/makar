@@ -138,6 +138,14 @@ daemon and the simulator cannot disagree about what time it is).
   identity `packets == forwarded + dropped + shed + still_held` is asserted in
   tests, not just documented.
 
+### ECN: the engine decides, the I/O layer writes
+
+`Decision::MarkEcn` keeps the packet path read-only: the engine parses the
+frame, checks the ECN codepoint, and returns a decision, while `nr-app` owns the
+bytes and calls `ecn::mark_ce` before handing them back to the driver. Keeping
+the rewrite out of `nr-core` also keeps the checksum arithmetic unit-testable on
+every platform, which is the only way to be sure about a byte we cannot see.
+
 ### CoDel on the way out
 
 The drain step consults `Codel` per packet, using the sojourn time the packet

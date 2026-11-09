@@ -40,6 +40,10 @@ pub enum OverLimitPolicy {
     /// Drop inbound packets that do not conform (yields a zero window, so the
     /// peer slows down instead of retransmitting into a wall).
     DropInbound = 2,
+    /// Mark over-limit packets CE and forward them, but only when the transport
+    /// negotiated ECN; anything else is shaped instead. The congestion signal
+    /// arrives without a retransmission, so the bandwidth is not spent twice.
+    Ecn = 3,
 }
 
 impl OverLimitPolicy {
@@ -49,6 +53,7 @@ impl OverLimitPolicy {
             "shape" | "delay" => Some(Self::Shape),
             "drop" | "clip" => Some(Self::Drop),
             "drop-inbound" | "dropin" => Some(Self::DropInbound),
+            "ecn" | "mark" => Some(Self::Ecn),
             _ => None,
         }
     }
@@ -60,6 +65,7 @@ impl OverLimitPolicy {
             Self::Shape => "shape",
             Self::Drop => "drop",
             Self::DropInbound => "drop-inbound",
+            Self::Ecn => "ecn",
         }
     }
 }
@@ -869,6 +875,15 @@ rule limit=chrome.exe : tcp
         let c = cfg.limit("c.exe").unwrap().cap.unwrap();
         assert_eq!(c.bytes, 1_000_000_000);
         assert_eq!(c.period, CapPeriod::Day);
+    }
+
+    #[test]
+    fn parses_the_ecn_policy() {
+        assert_eq!(OverLimitPolicy::parse("ecn"), Some(OverLimitPolicy::Ecn));
+        assert_eq!(OverLimitPolicy::parse("mark"), Some(OverLimitPolicy::Ecn));
+        assert_eq!(OverLimitPolicy::Ecn.as_str(), "ecn");
+        let (cfg, _) = Config::parse("limit a.exe = 1mbit policy ecn\n").unwrap();
+        assert_eq!(cfg.limit("a.exe").unwrap().policy, OverLimitPolicy::Ecn);
     }
 
     #[test]

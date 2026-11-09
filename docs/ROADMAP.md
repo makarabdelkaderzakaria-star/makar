@@ -100,7 +100,9 @@ Still open:
 * [x] CoDel queue management: bounds the delay our own buffering adds, which is
       the part of "the link is congested" this program is responsible for.
       `param codel = 5ms`, off by default.
-* [ ] ECN marking instead of dropping, where the peer supports it.
+* [x] ECN marking instead of dropping, where the peer supports it:
+      `policy ecn`, CE marking with the IPv4 checksum repaired incrementally and
+      a shaping fallback for `Not-ECT` traffic.
 
 ## 1.0 — interface
 

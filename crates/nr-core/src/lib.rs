@@ -42,6 +42,7 @@ pub mod attribution;
 pub mod calendar;
 pub mod codel;
 pub mod config;
+pub mod ecn;
 pub mod error;
 pub mod flow;
 pub mod frame;

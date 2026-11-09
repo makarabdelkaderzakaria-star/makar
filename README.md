@@ -93,7 +93,8 @@ counter survives a restart. `schedule 08:00-18:00` makes a limit exist only
 during that UTC window (it may wrap midnight), which is what "do not saturate
 the line while I am working" actually needs. `param codel = 5ms` bounds the
 delay the retention buffer itself adds, so a saturated line does not turn into
-a 200 ms-deep queue that drops nothing and helps nobody.
+a 200 ms-deep queue that drops nothing and helps nobody. `policy ecn` marks
+congestion into the packet instead of spending a retransmission on it.
 
 Full reference: [`docs/CONFIG.md`](docs/CONFIG.md).
 
