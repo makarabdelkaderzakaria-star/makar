@@ -44,7 +44,20 @@ jobs:
       - name: clippy
         run: cargo clippy --all-targets -- -D warnings
       - name: test
-        run: cargo test --all
+        shell: bash
+        run: |
+          set +e
+          cargo test --all 2>&1 | tee "$RUNNER_TEMP/test.log"
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ]; then
+            # The job log is large and only reachable from a browser; mirror the
+            # useful lines into check-run annotations, which the REST API serves.
+            grep -nE "^(error(\[[A-Z0-9]+\])?:|test .* FAILED|failures:|---- .* stdout ----|thread .* panicked)" \
+              "$RUNNER_TEMP/test.log" | head -25 | while IFS= read -r line; do
+              echo "::error title=cargo test::$line"
+            done
+          fi
+          exit "$status"
       - name: build release
         run: cargo build --release
       - name: smoke
