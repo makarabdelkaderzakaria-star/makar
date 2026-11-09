@@ -1,5 +1,35 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+* **`per-flow` limit scope.** `limit browser.exe = 8mbit per-flow` (or
+  `scope flow`) gives every connection its own GCRA lane instead of pooling the
+  process's flows into one bucket, so one saturated transfer no longer starves
+  the rest of the process — a browser streaming 4K stops breaking its own DNS.
+  The state is the `u64` the flow row already carries, so it costs no second
+  table, no allocation and no extra hashing on the default path. `lint` prints
+  the scope of every limit, and `netrocket init` writes an example.
+* `nr_divert::address`: the pure WinDivert ABI types (`Address`, `Layer`,
+  `Param`, `flags`, `pack`) moved out of the `cfg(windows)` module, so they are
+  compiled and unit-tested on every platform instead of only on Windows.
+
+### Fixed
+
+* **Deferred re-injection could carry the wrong priority.** `InjectContext`
+  sign-extended its 15-bit priority field from bit 15 instead of bit 14, so a
+  retained packet packed with `i16::MAX` priority came back as `-1`, and
+  `i16::MIN` came back as `0`. Out-of-range priorities are now clamped to the
+  representable range instead of wrapping, and the field is masked on the way
+  out. Found by running the existing test on Windows for the first time: the
+  test itself asserted that the whole `i16` range fits in a 16-bit word that
+  also carries the direction, which cannot hold.
+* **The test suite now runs on Windows in CI** and on Linux for everything that
+  is not Windows-only, which is how the defect above surfaced.
+* **CI never ran.** The workflow's step name contained an unquoted colon, so
+  GitHub rejected the whole file and every run failed at start-up with no jobs.
+
 ## 0.2.0 — 2026-11-08
 
 Closes the attribution gap, makes the Windows backend verifiable, and adds the

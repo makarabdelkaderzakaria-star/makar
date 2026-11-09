@@ -72,6 +72,27 @@ Consequences that matter:
   not hand the flow a free burst, which `ProcessRateLimiter.SetLimit` did by
   rebuilding the bucket.
 
+### Where the word lives
+
+By default one `Gcra` per **limit**, and every flow the process opens shares it
+— `process` scope. `limit <name> = <rate> per-flow` instead keeps the `tat` in
+`FlowEntry::state`, the `u64` the flow row already has, and borrows the
+configured lane for the single packet being decided:
+
+```
+lane = configured[limit];          // rate, burst, cost_per_byte
+lane.set_tat(entry.state);         // this connection's history
+lane.try_acquire(len, now);        // test and commit
+entry.state = lane.tat();          // write it back
+```
+
+So a second table keyed by the same 5-tuple is never allocated, and the
+`process` path — the default — never touches the extra word. The cost of
+`per-flow` is two loads and two stores on the flows that opted in. When the flow
+table is full, the packet falls back to the shared lane: shaping continues, just
+pooled with the process. Charging still happens at **emission**, which is why
+`Engine::on_emitted` takes the flow key as well as the limit index.
+
 ## Retention: bounded, short, and honest
 
 `Scheduler` (`scheduler.rs`) holds packets that a shaper cannot send yet.

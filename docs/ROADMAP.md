@@ -56,12 +56,17 @@ Still open:
       configuration in one read-only pass that diverts nothing.
 * [x] `docs/WINDOWS-BRINGUP.md`: the ordered checklist of what only hardware
       can settle, with a pass criterion per step.
+* [x] **CI actually runs.** The workflow file had an unquoted colon in a step
+      name, so GitHub rejected it and every run failed at start-up with zero
+      jobs — the pipeline had never executed. Fixed, and the run logs are
+      mirrored into check-run annotations so a failure is diagnosable without a
+      browser.
 * [ ] One-command installer: fetch the signed WinDivert binaries, verify the
       signature, place them next to the executable, register the driver.
       (`scripts/install-windivert.ps1` exists and refuses unsigned binaries; it
       has never been run.)
-* [ ] `cargo test` on a real Windows runner (the pure types, the two policy
-      tests and the snapshot decoder are `cfg`-gated and will run there).
+* [x] `cargo test` on a real Windows runner. It runs, and it immediately caught
+      the deferred-reinjection priority defect recorded in `CHANGELOG.md`.
 * [ ] Run `docs/WINDOWS-BRINGUP.md` steps 1–5 and publish the results,
       including the retransmission count from step 5.
 
@@ -76,8 +81,11 @@ Still open:
 
 ## 0.4 — features people will actually ask for
 
-* [ ] Per-flow (not just per-process) limits: a browser with one tab on a 4K
-      stream should not starve its own DNS.
+* [x] Per-flow (not just per-process) limits: a browser with one tab on a 4K
+      stream no longer starves its own DNS. `limit <name> = <rate> per-flow`,
+      with unit tests for independence, for the unchanged default, for
+      single-flow enforcement, and for emission charging only the flow that
+      emitted.
 * [ ] Time-of-day schedules and temporary boosts ("full speed until I am done").
 * [ ] Data caps: a byte budget per day/month, which is what metered connections
       need far more than a rate limit.
