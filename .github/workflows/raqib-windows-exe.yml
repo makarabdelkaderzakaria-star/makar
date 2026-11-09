@@ -252,6 +252,13 @@ jobs:
           if (Test-Path -LiteralPath "$env:RUNNER_TEMP\logs") {
             Copy-Item -Path "$env:RUNNER_TEMP\logs\*.log" -Destination 'raqib\ci-results\' -Force -ErrorAction SilentlyContinue
           }
+          # The bundles, so that a difference between two builds can be seen
+          # rather than guessed at.
+          foreach ($bundle in @('raqib\dist\raqib.mjs', 'raqib\dist\searchWorker.mjs', 'raqib\dist\sea\raqib.cjs', 'raqib\dist\sea\sea-prep.blob')) {
+            if (Test-Path -LiteralPath $bundle) {
+              Copy-Item -LiteralPath $bundle -Destination 'raqib\ci-results\' -Force
+            }
+          }
           git config user.email 'ci@raqib.local'
           git config user.name 'raqib ci'
           git add -f raqib/ci-results
