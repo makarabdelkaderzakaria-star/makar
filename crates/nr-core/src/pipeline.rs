@@ -982,7 +982,11 @@ mod tests {
         let mut e = scope_engine(LimitScope::Flow);
         for i in 0..4 {
             let out = e.process(&a, Direction::Outbound, 0, u32::MAX, i, 0, 0);
-            assert_eq!(out.decision, Decision::SendNow, "flow A packet {i} of burst");
+            assert_eq!(
+                out.decision,
+                Decision::SendNow,
+                "flow A packet {i} of burst"
+            );
         }
         let over = e.process(&a, Direction::Outbound, 0, u32::MAX, 10, 0, 0);
         assert!(
@@ -1058,11 +1062,7 @@ mod tests {
         let a_after = e.flows().get(&key_a).map_or(0, |f| f.state);
         let b_after = e.flows().get(&key_b).map_or(0, |f| f.state);
         assert!(a_after > 0, "emitting must charge flow A");
-        assert_eq!(
-            b_after,
-            b_before,
-            "emitting flow A must not charge flow B"
-        );
+        assert_eq!(b_after, b_before, "emitting flow A must not charge flow B");
         let b_now = e.process(&b, Direction::Outbound, 0, u32::MAX, 21, due, due / MS);
         assert!(b_now.is_send_now(), "flow B inherited flow A's charge");
     }
