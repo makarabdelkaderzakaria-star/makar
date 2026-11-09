@@ -14,7 +14,7 @@ built around three rules:
    enough for TCP to retransmit it, and account for every single byte.
 
 > **Status — 0.2.0.** Core engine, CLI, simulator and tests are complete
-> (148 tests on Linux, 155 on Windows). The Windows backend now covers the whole path — WinDivert
+> (184 tests on Linux, 190 on Windows). The Windows backend now covers the whole path — WinDivert
 > receive/send, FLOW attribution, start-up endpoint snapshot, process identity —
 > **compiles and lints clean for `x86_64-pc-windows-msvc` in CI**, and its ABI
 > decisions plus the table decoder are unit-tested on every platform.
@@ -126,7 +126,7 @@ happens in that path. Details: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 ## Tests
 
 ```bash
-cargo test                                        # 148 tests; 155 on Windows
+cargo test                                        # 184 tests; 190 on Windows
 cargo clippy --target x86_64-pc-windows-msvc -D warnings   # the Windows backend
 ```
 

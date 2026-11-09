@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+### Fixed
+
+* **Three defects that only a real test run could find.** The ECN work had never
+  been executed when it was committed: CI's format and lint steps failed before
+  the tests ran, and that was mistaken for a green build. With the tests finally
+  running they found (a) the IPv6 mark written to bits 7..6 of byte 1 instead of
+  the codepoint's bits 5..4, so an IPv6 packet was "marked" in a place no
+  receiver reads; (b) the IPv4 checksum repair done with `wrapping_add`, which
+  drops the end-around carry one's-complement addition requires, leaving a
+  header that fails its own check; and (c) a retention drain that walked the
+  queue by index while removing from the front — it skipped the packet after
+  every emitted or shed one and ran past the end of the queue once CoDel shed
+  mid-batch. Each now has a test that fails without the fix.
+* **The control channel linked against the wrong DLL on Windows.** The token and
+  ACL calls are exported by `advapi32`, not `kernel32`; one `extern` block for
+  both compiled and then failed at link time.
+
 ### Added
 
 * **Local control channel (`run --ctl=PATH`).** A GUI — or any local tool — can
