@@ -74,11 +74,11 @@ pub struct Shared {
 impl Shared {
     /// Wrap a configuration and its first snapshot.
     #[must_use]
-    pub fn new(config: Config, snapshot: Snapshot) -> Arc<Self> {
-        Arc::new(Self {
+    pub fn new(config: Config, snapshot: Snapshot) -> Self {
+        Self {
             config,
             snapshot: Mutex::new(snapshot),
-        })
+        }
     }
 
     /// Replace the published snapshot (called from the daemon's tick).
@@ -734,7 +734,7 @@ mod tests {
             flows: 12,
             ..Snapshot::default()
         };
-        Shared::new(config, snapshot)
+        Arc::new(Shared::new(config, snapshot))
     }
 
     /// A stream that connects a writer to a reader, for protocol tests.

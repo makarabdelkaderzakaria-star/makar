@@ -471,7 +471,7 @@ pub fn run(loaded: crate::configio::Loaded, args: &RunArgs) -> Result<(), String
         Some(path) => {
             let listener = crate::ipc::bind(path)
                 .map_err(|e| format!("control channel {}: {e}", path.display()))?;
-            let shared = crate::ipc::Shared::new(config.clone(), engine.snapshot());
+            let shared = Arc::new(crate::ipc::Shared::new(config.clone(), engine.snapshot()));
             let published = Arc::clone(&shared);
             eprintln!("control channel: {}", path.display());
             std::thread::Builder::new()

@@ -158,7 +158,7 @@ mod tests {
         let header = usize::from(ihl_words) * 4;
         let mut f = vec![0u8; header];
         f[0] = 0x40 | (ihl_words & 0x0F);
-        f[1] = 0x00 | ecn;
+        f[1] = ecn;
         f[8] = 64; // TTL
         f[9] = 6; // TCP
         f[12..16].copy_from_slice(&[10, 0, 0, 1]);

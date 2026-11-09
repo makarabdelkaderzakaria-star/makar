@@ -249,7 +249,7 @@ mod tests {
         assert_eq!(c.drops(), 1);
 
         // One packet that did not wait: the queue is no longer standing.
-        assert!(!c.should_drop(INTERVAL + MS, 1 * MS));
+        assert!(!c.should_drop(INTERVAL + MS, MS));
         assert!(!c.dropping());
 
         // A new episode has to start from scratch: patient for an interval.
