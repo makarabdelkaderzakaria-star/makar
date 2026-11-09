@@ -14,7 +14,7 @@ built around three rules:
    enough for TCP to retransmit it, and account for every single byte.
 
 > **Status — 0.2.0.** Core engine, CLI, simulator and tests are complete
-> (116 tests). The Windows backend now covers the whole path — WinDivert
+> (124 tests on Linux, 131 on Windows). The Windows backend now covers the whole path — WinDivert
 > receive/send, FLOW attribution, start-up endpoint snapshot, process identity —
 > **compiles and lints clean for `x86_64-pc-windows-msvc` in CI**, and its ABI
 > decisions plus the table decoder are unit-tested on every platform.
@@ -74,14 +74,19 @@ netrocket run --config=netrocket.conf
 ```text
 param max-retain = 250ms
 
-limit chrome.exe = 8mbit  burst 64kb
-limit steam.exe  = 20mbit burst 256kb
-limit backup.exe = 2mbit  burst 32kb policy drop
+limit chrome.exe  = 8mbit  burst 64kb
+limit steam.exe   = 20mbit burst 256kb
+limit backup.exe  = 2mbit  burst 32kb policy drop
+limit browser.exe = 8mbit  burst 64kb per-flow
 
-rule limit=chrome.exe : proc chrome.exe
-rule limit=steam.exe  : proc steam.exe
-rule limit=backup.exe : proc backup.exe
+rule limit=chrome.exe  : proc chrome.exe
+rule limit=steam.exe   : proc steam.exe
+rule limit=backup.exe  : proc backup.exe
+rule limit=browser.exe : proc browser.exe
 ```
+
+`per-flow` gives each connection its own bucket; without it a limit is one
+bucket shared by every flow the process opens.
 
 Full reference: [`docs/CONFIG.md`](docs/CONFIG.md).
 
@@ -111,7 +116,7 @@ happens in that path. Details: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 ## Tests
 
 ```bash
-cargo test                                        # 116 tests, all platforms
+cargo test                                        # 124 tests; 131 on Windows
 cargo clippy --target x86_64-pc-windows-msvc -D warnings   # the Windows backend
 ```
 

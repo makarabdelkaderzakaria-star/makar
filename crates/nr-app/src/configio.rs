@@ -96,15 +96,20 @@ param identity-ttl = 30s
 param batch-max = 64
 
 # --- limits ---------------------------------------------------------------
-# limit <name> = <rate> [burst <bytes>] [policy shape|drop|drop-inbound]
+# limit <name> = <rate> [burst <bytes>] [policy shape|drop|drop-inbound] [per-flow]
 #
 # policy shape         delay packets until they fit (no retransmissions)
 # policy drop          drop over-limit packets (TCP retransmits: wasteful)
 # policy drop-inbound  drop inbound packets instead (the peer slows down)
 #
+# per-flow             one bucket per connection instead of one per process.
+#                      A browser with one tab on a 4K stream no longer starves
+#                      its own DNS lookups. `scope process` is the default.
+#
 limit chrome.exe  = 8mbit   burst 64kb
 limit steam.exe   = 20mbit  burst 256kb
 limit backup.exe  = 2mbit   burst 32kb policy drop
+limit browser.exe = 8mbit   burst 64kb per-flow
 
 # --- rules ---------------------------------------------------------------
 # First match wins. An empty rule list means "count only, shape nothing".
@@ -120,6 +125,7 @@ limit backup.exe  = 2mbit   burst 32kb policy drop
 rule limit=chrome.exe  : proc chrome.exe
 rule limit=steam.exe   : proc steam.exe
 rule limit=backup.exe  : proc backup.exe
+rule limit=browser.exe : proc browser.exe
 "#;
 
 /// Write `text` to `path` atomically (temp file, fsync, rename).
@@ -157,11 +163,12 @@ pub fn lint(loaded: &Loaded) -> String {
     }
     for l in &loaded.config.limits {
         s.push_str(&format!(
-            "  {:<16} {:>10}  burst {:>8}  policy {}\n",
+            "  {:<16} {:>10}  burst {:>8}  policy {:<12} scope {}\n",
             l.name,
             nr_core::stats::human_bps(l.rate_bps),
             nr_core::stats::human_bytes(l.burst_bytes),
-            l.policy.as_str()
+            l.policy.as_str(),
+            l.scope.as_str()
         ));
     }
 
@@ -265,10 +272,15 @@ mod tests {
         let text = template();
         let (cfg, rules) = Config::parse(&text).unwrap();
         cfg.validate().unwrap();
-        assert_eq!(cfg.limits.len(), 3);
-        assert_eq!(rules.len(), 3);
+        assert_eq!(cfg.limits.len(), 4);
+        assert_eq!(rules.len(), 4);
         let (_, compiled) = Engine::<8192>::compile_rules(&rules, &cfg.limits).unwrap();
-        assert_eq!(compiled.len(), 3);
+        assert_eq!(compiled.len(), 4);
+        assert_eq!(
+            cfg.limit("browser.exe").unwrap().scope,
+            nr_core::LimitScope::Flow,
+            "the template must keep demonstrating per-flow scope"
+        );
     }
 
     #[test]
@@ -278,7 +290,7 @@ mod tests {
         let path = dir.join("netrocket.conf");
         save_atomic(&path, &template()).unwrap();
         let loaded = load(&path).unwrap();
-        assert_eq!(loaded.config.limits.len(), 3);
+        assert_eq!(loaded.config.limits.len(), 4);
         assert!(!dir.join("netrocket.conf.tmp").exists());
         let _ = fs::remove_dir_all(&dir);
     }
@@ -302,6 +314,10 @@ mod tests {
         assert!(out.contains("chrome.exe"));
         assert!(out.contains("first match wins"));
         assert!(out.contains("Mbit/s"));
+        assert!(
+            out.contains("scope per-flow"),
+            "lint must show the scope:\n{out}"
+        );
         let _ = fs::remove_dir_all(&dir);
     }
 

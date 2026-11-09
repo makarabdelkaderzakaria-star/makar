@@ -10,6 +10,9 @@
 //! * [`sim`] — a synthetic transport used by `nr simulate`, by the integration
 //!   tests and by the benchmark, so the whole pipeline is exercised end to end
 //!   on Linux.
+//! * [`address`] — the pure WinDivert ABI types (address, layer, pack);
+//!   compiled and tested on every platform, including the offsets and the
+//!   deferred-reinjection wire format.
 //! * [`win`] — the real WinDivert backend (`cfg(windows)` only).
 //! * [`win_snapshot`] — the start-up endpoint table (`GetExtendedTcpTable`),
 //!   whose decoding is pure and therefore tested on every platform.
@@ -37,6 +40,7 @@
 #![cfg_attr(windows, allow(unsafe_code))]
 #![cfg_attr(not(windows), forbid(unsafe_code))]
 
+pub mod address;
 pub mod batch;
 pub mod clock;
 pub mod sim;

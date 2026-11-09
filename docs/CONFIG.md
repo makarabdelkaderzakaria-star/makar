@@ -34,12 +34,13 @@ Durations accept `ms`, `s`, or a bare number of milliseconds. Sizes accept
 packets is a shaper that causes retransmissions, and a retransmission spends the
 bandwidth twice. `250ms` is below the smallest plausible TCP RTO.
 
-## `limit <name> = <rate> [burst <bytes>] [policy <p>]`
+## `limit <name> = <rate> [burst <bytes>] [policy <p>] [per-flow]`
 
 ```text
-limit chrome.exe = 8mbit   burst 64kb
-limit steam.exe  = 20mbit  burst 256kb
-limit backup.exe = 2mbit   burst 32kb policy drop
+limit chrome.exe  = 8mbit   burst 64kb
+limit steam.exe   = 20mbit  burst 256kb
+limit backup.exe  = 2mbit   burst 32kb policy drop
+limit browser.exe = 8mbit   burst 64kb per-flow
 ```
 
 * Rates: `8mbit`, `20mbps`, `512kbit`, `1.5mbit`, or a bare byte/s number.
@@ -52,6 +53,13 @@ limit backup.exe = 2mbit   burst 32kb policy drop
 | `shape` *(default)* | delay packets until they fit | **1×** — nothing is ever retransmitted |
 | `drop` | drop over-limit outbound packets | 2× — TCP retransmits them |
 | `drop-inbound` | drop over-limit inbound packets | ~1× — the peer sees a zero window and slows down |
+
+* `per-flow` (or `scope flow`): one bucket **per connection** instead of one
+  per process. A browser downloading a 4K stream no longer starves its own DNS
+  queries, and one saturated transfer cannot take the whole process's allowance.
+  The cost is one `u64` in the flow table row that already exists — no second
+  table, no allocation. `scope process` is the default and is what every
+  previous version did.
 
 ## `rule <action> : <match>`
 
@@ -90,7 +98,14 @@ rule. To make a limit belong to one process, say so:
 rule limit=chrome.exe : proc chrome.exe
 ```
 
-`netrocket lint` prints the compiled predicates for exactly this reason.
+`netrocket lint` prints the compiled predicates for exactly this reason, and now
+prints each limit's scope too. A `per-flow` limit is the answer when the sharing
+is the problem rather than the attribution:
+
+```text
+limit browser.exe = 8mbit burst 64kb per-flow
+rule limit=browser.exe : proc browser.exe
+```
 
 ## Complete example
 
@@ -102,6 +117,7 @@ param retain-budget = 2mb
 limit chrome.exe = 8mbit  burst 64kb
 limit steam.exe  = 20mbit burst 256kb
 limit backup.exe = 2mbit  burst 32kb policy drop
+limit browser.exe = 8mbit burst 64kb per-flow
 
 rule allow          : proc svchost.exe
 rule limit=chrome.exe : proc chrome.exe

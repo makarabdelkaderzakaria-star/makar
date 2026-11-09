@@ -3,7 +3,14 @@
 This file exists because a project that claims to be "faster and lighter" owes
 the reader a list of what it has *not* proven.
 
-> **This file changed again at 0.2.0.** The start-up endpoint snapshot is
+> **This file changed again after 0.2.0.** CI had never actually run — the
+> workflow file was invalid — so "enforced in CI" below now means it is enforced
+> for real, on Linux and on a Windows runner. The first Windows run found a
+> re-injection defect that no Linux build could see (`CHANGELOG.md`). `per-flow`
+> limits are unit-tested, but like everything else in the engine they have not
+> been measured on hardware.
+>
+> **This file changed at 0.2.0.** The start-up endpoint snapshot is
 > implemented and its decoder is unit-tested on Linux, the `run --monitor`
 > defect is fixed, and `netrocket doctor` exists. The claim is still **not** "it
 > runs on Windows" — it is "it compiles for Windows, the ABI decisions and the
@@ -26,7 +33,8 @@ What that does and does not buy you:
 | `WINDIVERT_ADDRESS` is 80 bytes with the union at offset 16 | **asserted at compile time** on both targets |
 | The bitfield map (`Outbound` = 17, `IPv6` = 20, checksums 21–23) | **unit-tested** (`win::tests::bitfield_decoding_matches_the_header`) |
 | `WINDIVERT_DATA_FLOW` offsets (PID at 16, ports at 52/54, protocol 56) | **unit-tested** (`flow_layer_fields_are_read_at_the_right_offsets`) |
-| A deferred packet can be re-injected without remembering a stale address | **unit-tested** via a 16-bit injection context (`pack::InjectContext`) |
+| A deferred packet can be re-injected without remembering a stale address | **unit-tested** via a 16-bit injection context (`address::pack::InjectContext`) |
+| That context survives a round trip with its direction and priority intact | **unit-tested** on every platform — this assertion was false until 0.2's CI ran on Windows (see `CHANGELOG.md`) |
 | The driver accepts our re-injected packets | **untested** — needs hardware |
 | `WinDivertHelperParsePacket` agreement with our own parser | **untested** — needs hardware |
 | `dist/netrocket-0.2.0-windows-x64.zip` contains a working shaper | **not claimed** — the binary has never been started |

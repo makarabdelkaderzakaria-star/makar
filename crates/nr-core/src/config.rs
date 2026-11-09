@@ -13,6 +13,7 @@
 //! param queue-time   = 500ms
 //! limit chrome.exe  = 8mbit   burst 64kb  policy shape
 //! limit steam.exe   = 20mbit
+//! limit browser.exe = 8mbit   per-flow
 //! rule  limit=chrome.exe : tcp
 //! rule  block : udp dport 27015
 //! ```
@@ -63,6 +64,53 @@ impl OverLimitPolicy {
     }
 }
 
+/// What a limit's bucket is shared between.
+///
+/// The original implementation had exactly one bucket per rule, so one
+/// aggressive transfer starved every other connection the same process owned
+/// (a browser streaming 4K starves its own DNS lookups). [`LimitScope::Flow`]
+/// gives each connection its own bucket instead.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, PartialOrd, Ord, Hash)]
+#[repr(u8)]
+pub enum LimitScope {
+    /// One bucket per process: every flow the process opens shares the rate.
+    /// This is the historical behaviour and the default.
+    #[default]
+    Process = 0,
+    /// One bucket per flow: each connection gets the full configured rate.
+    Flow = 1,
+}
+
+impl LimitScope {
+    /// Parse from the config file spelling.
+    #[must_use]
+    pub fn parse(s: &str) -> Option<Self> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "process" | "proc" | "shared" => Some(Self::Process),
+            "per-flow" | "perflow" | "flow" | "connection" => Some(Self::Flow),
+            _ => None,
+        }
+    }
+
+    /// Stable spelling for the config file, logs and diagnostics.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Process => "process",
+            Self::Flow => "per-flow",
+        }
+    }
+
+    /// Spelling used in a `limit` line (`per-flow` is a bare token there).
+    #[must_use]
+    pub const fn as_token(self) -> &'static str {
+        match self {
+            Self::Process => "process",
+            Self::Flow => "per-flow",
+        }
+    }
+}
+
 /// One named bandwidth limit.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Limits {
@@ -74,6 +122,8 @@ pub struct Limits {
     pub burst_bytes: u64,
     /// Over-limit policy.
     pub policy: OverLimitPolicy,
+    /// Whether the bucket is shared by the process or kept per flow.
+    pub scope: LimitScope,
 }
 
 impl Limits {
@@ -85,7 +135,22 @@ impl Limits {
             rate_bps: 0,
             burst_bytes: 64 * 1024,
             policy: OverLimitPolicy::Shape,
+            scope: LimitScope::Process,
         }
+    }
+
+    /// Give every flow its own bucket (see [`LimitScope`]).
+    #[must_use]
+    pub fn per_flow(mut self) -> Self {
+        self.scope = LimitScope::Flow;
+        self
+    }
+
+    /// Set the scope explicitly.
+    #[must_use]
+    pub fn scope(mut self, scope: LimitScope) -> Self {
+        self.scope = scope;
+        self
     }
 
     /// Set rate in bytes per second.
@@ -373,6 +438,20 @@ fn parse_limit(rest: &str) -> Result<Limits, ConfigError> {
                     value: v.to_owned(),
                 })?;
             }
+            // `per-flow` is a bare token; `scope flow` is the same thing spelled
+            // with an argument, because both read naturally in a config file.
+            "per-flow" | "perflow" => limit.scope = LimitScope::Flow,
+            "scope" => {
+                let v = tokens.next().ok_or_else(|| ConfigError::BadValue {
+                    key: "limit.scope".to_owned(),
+                    value: String::new(),
+                })?;
+                limit.scope = LimitScope::parse(v).ok_or_else(|| ConfigError::BadValue {
+                    key: "limit.scope".to_owned(),
+                    value: v.to_owned(),
+                })?;
+            }
+            "process" | "shared" => limit.scope = LimitScope::Process,
             other => {
                 return Err(ConfigError::UnknownParam(other.to_owned()));
             }
@@ -508,5 +587,42 @@ rule limit=chrome.exe : tcp
     fn validate_rejects_zero_rate() {
         assert!(Limits::new("x").rate(0).validate().is_err());
         assert!(Limits::new("x").bits(8_000_000).validate().is_ok());
+    }
+
+    #[test]
+    fn parses_per_flow_scope_two_ways() {
+        let (cfg, _) = Config::parse(
+            "limit browser.exe = 8mbit per-flow\n\
+             limit backup.exe  = 2mbit scope flow burst 8kb\n\
+             limit plain.exe   = 1mbit\n",
+        )
+        .unwrap();
+        assert_eq!(
+            cfg.limit("browser.exe").unwrap().scope,
+            LimitScope::Flow,
+            "the bare `per-flow` token must set the scope"
+        );
+        assert_eq!(cfg.limit("backup.exe").unwrap().scope, LimitScope::Flow);
+        // The rest of the line still parses after the scope token.
+        assert_eq!(cfg.limit("backup.exe").unwrap().burst_bytes, 8_000);
+        // Defaulting is not accidental.
+        assert_eq!(cfg.limit("plain.exe").unwrap().scope, LimitScope::Process);
+    }
+
+    #[test]
+    fn rejects_a_bad_scope_value() {
+        let err = Config::parse("limit x.exe = 1mbit scope banana\n").unwrap_err();
+        assert!(matches!(err, ConfigError::BadValue { .. }), "{err:?}");
+    }
+
+    #[test]
+    fn scope_spellings_round_trip() {
+        for scope in [LimitScope::Process, LimitScope::Flow] {
+            assert_eq!(LimitScope::parse(scope.as_str()), Some(scope));
+            assert_eq!(LimitScope::parse(scope.as_token()), Some(scope));
+            let (cfg, _) =
+                Config::parse(&format!("limit a.exe = 1mbit {}\n", scope.as_token())).unwrap();
+            assert_eq!(cfg.limit("a.exe").unwrap().scope, scope);
+        }
     }
 }

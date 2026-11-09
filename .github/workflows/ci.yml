@@ -4,12 +4,22 @@ on:
   push:
   pull_request:
 
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: never
+  RUST_BACKTRACE: 1
+
 jobs:
   # The Windows backend is cfg(windows) code developed on Linux. Type-check it
   # from a Linux runner so it can never silently rot again -- the first draft of
   # crates/nr-divert/src/win.rs did not even compile.
   windows-check:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -17,9 +27,9 @@ jobs:
           targets: x86_64-pc-windows-msvc
           components: clippy
       - name: clippy (windows target, all targets)
-        run: cargo clippy --target x86_64-pc-windows-msvc --all-targets -- -D warnings
+        run: bash scripts/ci-annotate.sh "clippy/windows" cargo clippy --target x86_64-pc-windows-msvc --all-targets -- -D warnings
       - name: check (windows target)
-        run: cargo check --target x86_64-pc-windows-msvc --all-targets
+        run: bash scripts/ci-annotate.sh "check/windows" cargo check --target x86_64-pc-windows-msvc --all-targets
 
   test:
     strategy:
@@ -27,26 +37,27 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
       - name: fmt
-        run: cargo fmt --all -- --check
+        run: bash scripts/ci-annotate.sh fmt cargo fmt --all -- --check
       - name: clippy
-        run: cargo clippy --all-targets -- -D warnings
+        run: bash scripts/ci-annotate.sh clippy cargo clippy --all-targets -- -D warnings
       - name: test
-        run: cargo test --all
-      - name: test (windows target: pure types + policy checks)
-        if: matrix.os == 'windows-latest'
-        run: cargo test --all
+        run: bash scripts/ci-annotate.sh test cargo test --all
       - name: build release
-        run: cargo build --release
+        run: bash scripts/ci-annotate.sh build cargo build --release
       - name: smoke
+        shell: bash
         run: |
           ./target/release/netrocket version
           ./target/release/netrocket init
           ./target/release/netrocket check
+          ./target/release/netrocket lint
           ./target/release/netrocket simulate --frames=500
-        shell: bash
