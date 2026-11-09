@@ -7,6 +7,7 @@ mod caps;
 mod cli;
 mod configio;
 mod doctor;
+mod ipc;
 mod runner;
 mod tui;
 

@@ -197,6 +197,14 @@ pub fn simulate(loaded: &crate::configio::Loaded, args: &SimArgs) -> Result<SimO
                     limit_of.insert(token, (li, flow));
                 }
             }
+            Decision::MarkEcn => {
+                // The engine decided; the bytes are ours to rewrite.
+                let marked = nr_core::ecn::mark_ce(&mut buf[..len]);
+                debug_assert!(marked.changed(), "the engine only marks ECT packets");
+                let _ = transport.send(&buf[..len], token);
+                forwarded += 1;
+                forwarded_bytes += len as u64;
+            }
             Decision::Drop(_) => {}
         }
 
@@ -456,6 +464,29 @@ pub fn run(loaded: crate::configio::Loaded, args: &RunArgs) -> Result<(), String
     let mut engine = Engine::<8192>::new(config.clone());
     engine.set_rules(loaded.rules);
 
+    // Control channel for a local UI. The packet path never touches it: the
+    // loop below drops a fresh snapshot into the shared cell once a second and
+    // the serving thread does the rest.
+    let ctl = match args.ctl.as_deref() {
+        Some(path) => {
+            let listener = crate::ipc::bind(path)
+                .map_err(|e| format!("control channel {}: {e}", path.display()))?;
+            let shared = Arc::new(crate::ipc::Shared::new(config.clone(), engine.snapshot()));
+            let published = Arc::clone(&shared);
+            eprintln!("control channel: {}", path.display());
+            std::thread::Builder::new()
+                .name("nr-ctl".to_owned())
+                .spawn(move || {
+                    if let Err(e) = crate::ipc::serve_listener(listener, shared) {
+                        eprintln!("control channel stopped: {e}");
+                    }
+                })
+                .map_err(|e| format!("control channel thread: {e}"))?;
+            Some(published)
+        }
+        None => None,
+    };
+
     // Data caps: the counters live next to the configuration file, so a restart
     // does not hand back a budget that was already spent today.
     let caps_path = crate::caps::path_for(&args.config);
@@ -554,7 +585,7 @@ pub fn run(loaded: crate::configio::Loaded, args: &RunArgs) -> Result<(), String
 
         let mut addr = nr_divert::win::Address::default();
         let received = interceptor.recv_with_addr(&mut addr);
-        let (frame, direction) = match received {
+        let (mut frame, direction) = match received {
             Ok(Some((frame, direction))) => (frame.to_vec(), direction),
             Ok(None) => break,
             Err(e) => {
@@ -611,6 +642,19 @@ pub fn run(loaded: crate::configio::Loaded, args: &RunArgs) -> Result<(), String
         );
 
         match outcome.decision {
+            Decision::MarkEcn => {
+                // Only an ECN-capable transport reaches this arm, and the
+                // engine has already counted the mark. The bytes are ours to
+                // rewrite: the engine's packet path is read-only by design.
+                let _ = nr_core::ecn::mark_ce(&mut frame);
+                if !args.monitor
+                    && interceptor
+                        .send_deferred(&frame, InjectContext::new(direction, 0))
+                        .is_err()
+                {
+                    send_failures += 1;
+                }
+            }
             Decision::SendNow => {
                 // Sniffed packets are already delivered by the stack, so in
                 // monitor mode we never inject.
@@ -700,6 +744,9 @@ pub fn run(loaded: crate::configio::Loaded, args: &RunArgs) -> Result<(), String
                 snap.dropped_total(),
                 unknown_flows
             );
+            if let Some(shared) = &ctl {
+                shared.publish(snap);
+            }
         }
     }
 

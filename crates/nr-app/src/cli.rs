@@ -53,6 +53,8 @@ pub struct RunArgs {
     pub monitor: bool,
     /// Override the engine filter.
     pub filter: Option<String>,
+    /// Serve the read-only control channel on this path (pipe name on Windows).
+    pub ctl: Option<PathBuf>,
 }
 
 /// Arguments for `nr simulate`.
@@ -128,6 +130,9 @@ pub fn parse<I: IntoIterator<Item = String>>(args: I) -> Result<Command, String>
                     "--monitor" => a.monitor = true,
                     _ if flag.starts_with("--config=") => {
                         a.config = PathBuf::from(&flag["--config=".len()..]);
+                    }
+                    _ if flag.starts_with("--ctl=") => {
+                        a.ctl = Some(PathBuf::from(&flag["--ctl=".len()..]));
                     }
                     _ if flag.starts_with("--filter=") => {
                         a.filter = Some(flag["--filter=".len()..].to_owned());
@@ -247,7 +252,7 @@ pub const fn help_text() -> &'static str {
 netrocket — per-application bandwidth shaping for Windows, in Rust
 
 USAGE
-  netrocket run      [--config=FILE] [--monitor] [--filter=EXPR]
+  netrocket run      [--config=FILE] [--monitor] [--filter=EXPR] [--ctl=PATH]
   netrocket simulate [--config=FILE] [--flows=N] [--frames=N] [--at=HH:MM] [--verbose]
   netrocket bench    [--flows=N] [--frames=N] [--repeat=N] [--stream]
   netrocket init     [--config=FILE] [--force]
@@ -259,6 +264,8 @@ USAGE
 COMMANDS
   run        Shape traffic using the WinDivert driver. Needs Administrator.
              --monitor counts packets without diverting them (zero risk).
+             --ctl serves a read-only control channel on PATH (a pipe name
+             on Windows) so a local UI can read counters without the driver.
   simulate   Replay deterministic synthetic traffic through the real engine.
              Works on any OS. Nothing is intercepted, nothing is shaped.
   bench      Measure packets/second through the pipeline. Works on any OS.

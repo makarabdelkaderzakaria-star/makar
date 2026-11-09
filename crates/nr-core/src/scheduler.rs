@@ -25,6 +25,7 @@
 //! * On overflow we shed the **stalest** entry (largest wait already invested),
 //!   which is the least useful packet in the queue, and we count it.
 
+use crate::codel::Codel;
 use core::cmp::Ordering;
 
 /// Why a packet could not be admitted.
@@ -85,6 +86,8 @@ pub struct Scheduler<A: Copy = ()> {
     shed_budget: u64,
     shed_late: u64,
     shed_quota: u64,
+    /// CoDel, if the operator turned it on; disabled means "never drop".
+    codel: Codel,
     emitted: u64,
     max_wait_ns: u64,
     max_held: u64,
@@ -119,6 +122,7 @@ impl<A: Copy> Scheduler<A> {
             shed_budget: 0,
             shed_late: 0,
             shed_quota: 0,
+            codel: Codel::disabled(),
             emitted: 0,
             max_wait_ns: 0,
             max_held: 0,
@@ -179,6 +183,25 @@ impl<A: Copy> Scheduler<A> {
     #[must_use]
     pub const fn max_held_bytes(&self) -> u64 {
         self.max_held
+    }
+
+    /// Arm or disarm CoDel. Zero either value disables it.
+    pub fn set_codel(&mut self, target_ns: u64, interval_ns: u64) {
+        self.codel = Codel::new(target_ns, interval_ns);
+    }
+
+    /// Packets CoDel has dropped since start-up.
+    #[inline]
+    #[must_use]
+    pub const fn codel_drops(&self) -> u64 {
+        self.codel.drops()
+    }
+
+    /// Is CoDel armed?
+    #[inline]
+    #[must_use]
+    pub const fn codel_enabled(&self) -> bool {
+        self.codel.is_enabled()
     }
 
     /// Shed counters `(budget, too_late, flow_quota)`.
@@ -322,23 +345,35 @@ impl<A: Copy> Scheduler<A> {
             return 0;
         }
         // Split borrow: read entries, then read the arena immutably.
-        for i in 0..due {
-            let e = self.live[i];
+        //
+        // CoDel is consulted per packet, on the way *out*: the sojourn time is
+        // what this packet has already waited, which is exactly the standing
+        // queue its arrival found. A packet it refuses is shed instead of sent,
+        // so the delay our own buffering adds has a ceiling even when nothing
+        // is over its rate limit.
+        let mut sent = 0usize;
+        // Take the batch out with `drain` rather than indexing it: the batch is
+        // exactly the `due` packets at the front, and removing from the front
+        // while walking an index skips packets and can run off the end once
+        // CoDel starts shedding entries mid-batch.
+        for e in self.live.drain(..due) {
+            let waited = now_ns.saturating_sub(e.admitted_ns);
+            if self.codel.should_drop(now_ns, waited) {
+                self.held -= u64::from(e.len);
+                continue;
+            }
             let start = e.offset as usize;
             let end = start + e.len as usize;
             let frame = &self.arena[start..end];
-            let waited = now_ns.saturating_sub(e.admitted_ns);
             f(Due {
                 frame,
                 addr: e.addr,
                 waited_ns: waited,
             });
-        }
-        for _ in 0..due {
-            let e = self.live.remove(0);
             self.held -= u64::from(e.len);
             self.emitted += 1;
-            self.max_wait_ns = self.max_wait_ns.max(now_ns.saturating_sub(e.admitted_ns));
+            self.max_wait_ns = self.max_wait_ns.max(waited);
+            sent += 1;
         }
         // Reclaim the front of the arena when it is fully consumed.
         if self.live.is_empty() {
@@ -347,7 +382,7 @@ impl<A: Copy> Scheduler<A> {
         } else if self.arena_used > 0 && self.held * 2 < u64::from(self.arena_used) {
             self.compact();
         }
-        due
+        sent
     }
 
     /// Drop everything (shutdown / config change).
@@ -484,5 +519,115 @@ mod tests {
         s.clear();
         assert!(s.is_empty());
         assert_eq!(s.held_bytes(), 0);
+    }
+
+    #[test]
+    fn codel_off_by_default_never_sheds_a_due_packet() {
+        let mut s: Scheduler<u8> = Scheduler::new(1 << 20, 250);
+        assert!(!s.codel_enabled());
+        // A packet that waited 200 ms -- far past any sane target -- is still
+        // delivered, because the operator never turned CoDel on.
+        assert!(matches!(
+            s.admit(b"aaa", 1u8, 10 * MS, 0, 0),
+            Admit::Retained { .. }
+        ));
+        let mut seen = Vec::new();
+        assert_eq!(s.drain_due(200 * MS, 64, |d| seen.push(d.addr)), 1);
+        assert_eq!(seen, vec![1u8]);
+        assert_eq!(s.codel_drops(), 0);
+    }
+
+    #[test]
+    fn armed_codel_sheds_the_packets_that_would_have_been_late() {
+        let mut s: Scheduler<u8> = Scheduler::new(1 << 20, 250);
+        s.set_codel(5 * MS, 100 * MS);
+        assert!(s.codel_enabled());
+        for i in 0..4u8 {
+            let due = (10 + 10 * u64::from(i)) * MS;
+            let flow = u32::from(i);
+            assert!(matches!(
+                s.admit(b"aaa", i, due, 0, flow),
+                Admit::Retained { .. }
+            ));
+        }
+
+        // t = 20 ms: two packets are due, each waited 20 ms. Above the target
+        // for the first time, so both are delivered and the episode starts.
+        let mut sent = Vec::new();
+        assert_eq!(s.drain_due(20 * MS, 64, |d| sent.push(d.addr)), 2);
+        assert_eq!(s.codel_drops(), 0, "the first observation never drops");
+
+        // t = 130 ms: two more are due, each waited ~120 ms, and the queue has
+        // been above target for a full interval. The first is shed; the next
+        // drop may not happen for another interval, so the second goes out.
+        let emitted = s.drain_due(130 * MS, 64, |d| sent.push(d.addr));
+        assert_eq!(emitted, 1, "one of the two must be sacrificed");
+        assert_eq!(s.codel_drops(), 1);
+        assert_eq!(sent.len(), 3);
+        assert_eq!(s.len(), 0, "the queue must be empty either way");
+        assert_eq!(s.held_bytes(), 0, "and its bytes released");
+    }
+
+    #[test]
+    fn a_short_wait_is_never_shed_even_with_codel_armed() {
+        let mut s: Scheduler<u8> = Scheduler::new(1 << 20, 250);
+        s.set_codel(50 * MS, 100 * MS);
+        assert!(matches!(
+            s.admit(b"aaa", 7u8, 10 * MS, 0, 0),
+            Admit::Retained { .. }
+        ));
+        // Drained 10 ms later: inside the target, so it is delivered.
+        let mut seen = Vec::new();
+        assert_eq!(s.drain_due(10 * MS, 64, |d| seen.push(d.addr)), 1);
+        assert_eq!(seen, vec![7u8]);
+        assert_eq!(s.codel_drops(), 0);
+    }
+
+    #[test]
+    fn codel_drops_are_counted_in_the_shed_total_the_engine_reports() {
+        // The identity the snapshot promises is
+        // `packets == forwarded + dropped_total + retained_shed + left`, so
+        // CoDel drops must be part of the shed total, not a silent leak.
+        let mut s: Scheduler<u8> = Scheduler::new(1 << 20, 250);
+        s.set_codel(5 * MS, 100 * MS);
+        for i in 0..4u8 {
+            let due = (10 + 10 * u64::from(i)) * MS;
+            let flow = u32::from(i);
+            assert!(matches!(
+                s.admit(b"aaa", i, due, 0, flow),
+                Admit::Retained { .. }
+            ));
+        }
+        let mut emitted = s.drain_due(20 * MS, 64, |_| {}) as u64;
+        emitted += s.drain_due(130 * MS, 64, |_| {}) as u64;
+        let (a, b, c) = s.shed();
+        assert_eq!(a + b + c + s.codel_drops(), 1, "exactly one CoDel drop");
+        assert_eq!(emitted + s.codel_drops(), 4, "every packet accounted for");
+    }
+
+    #[test]
+    fn a_shed_batch_is_walked_to_its_end_instead_of_off_it() {
+        let mut s: Scheduler<u8> = Scheduler::new(1 << 20, 250);
+        s.set_codel(5 * MS, 100 * MS);
+        for i in 0..4u8 {
+            let flow = u32::from(i);
+            assert!(matches!(
+                s.admit(b"aaa", i, 10 * MS, 0, flow),
+                Admit::Retained { .. }
+            ));
+        }
+
+        // One packet leaves at 20 ms, which starts the above-target episode.
+        assert_eq!(s.drain_due(20 * MS, 1, |_| {}), 1);
+
+        // The three that are left are due at 130 ms, long enough to shed the
+        // first of them. Walking the batch by index while removing from the
+        // front skipped the next packet and then read past the end of the
+        // queue; the batch has to be consumed front to back exactly once.
+        let mut seen = Vec::new();
+        assert_eq!(s.drain_due(130 * MS, 64, |d| seen.push(d.addr)), 2);
+        assert_eq!(s.codel_drops(), 1);
+        assert_eq!(seen, vec![2u8, 3u8], "no packet is skipped");
+        assert!(s.is_empty(), "and none is left behind");
     }
 }

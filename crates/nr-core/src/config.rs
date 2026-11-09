@@ -40,6 +40,10 @@ pub enum OverLimitPolicy {
     /// Drop inbound packets that do not conform (yields a zero window, so the
     /// peer slows down instead of retransmitting into a wall).
     DropInbound = 2,
+    /// Mark over-limit packets CE and forward them, but only when the transport
+    /// negotiated ECN; anything else is shaped instead. The congestion signal
+    /// arrives without a retransmission, so the bandwidth is not spent twice.
+    Ecn = 3,
 }
 
 impl OverLimitPolicy {
@@ -49,6 +53,7 @@ impl OverLimitPolicy {
             "shape" | "delay" => Some(Self::Shape),
             "drop" | "clip" => Some(Self::Drop),
             "drop-inbound" | "dropin" => Some(Self::DropInbound),
+            "ecn" | "mark" => Some(Self::Ecn),
             _ => None,
         }
     }
@@ -60,6 +65,7 @@ impl OverLimitPolicy {
             Self::Shape => "shape",
             Self::Drop => "drop",
             Self::DropInbound => "drop-inbound",
+            Self::Ecn => "ecn",
         }
     }
 }
@@ -392,6 +398,15 @@ pub struct Config {
     /// Maximum time a packet may be retained before we give up on it. Beyond
     /// this, delivery is worse than loss (TCP already retransmitted).
     pub max_retain_ms: u64,
+    /// CoDel target standing-queue delay in ms; `0` (the default) disables it.
+    ///
+    /// CoDel does not replace the rate limits, it bounds the delay *our own*
+    /// buffering adds: when the retained queue has been standing above this
+    /// target for a whole interval, packets are dropped on the way out instead
+    /// of being delivered late.
+    pub codel_target_ms: u64,
+    /// How long the queue must stay above the target before CoDel acts.
+    pub codel_interval_ms: u64,
     /// Flow idle timeout before the row is swept.
     pub flow_idle_ms: u64,
     /// Packet batch size requested from `RecvEx` (1..=255).
@@ -416,6 +431,8 @@ impl Default for Config {
             queue_size: 1 << 20,
             retain_budget_bytes: 2 << 20,
             max_retain_ms: 250,
+            codel_target_ms: 0,
+            codel_interval_ms: 100,
             flow_idle_ms: 120_000,
             batch_max: 64,
             recv_timeout_ms: 100,
@@ -481,6 +498,16 @@ impl Config {
             }
             "max-retain" | "max-retain-ms" => {
                 self.max_retain_ms = parse_duration_ms(v).ok_or_else(bad)?
+            }
+            "codel" | "codel-target" | "codel-target-ms" => {
+                self.codel_target_ms = parse_duration_ms(v).ok_or_else(bad)?
+            }
+            "codel-interval" | "codel-interval-ms" => {
+                let ms = parse_duration_ms(v).ok_or_else(bad)?;
+                if ms == 0 {
+                    return Err(bad());
+                }
+                self.codel_interval_ms = ms;
             }
             "flow-idle" | "flow-idle-ms" => {
                 self.flow_idle_ms = parse_duration_ms(v).ok_or_else(bad)?
@@ -848,6 +875,31 @@ rule limit=chrome.exe : tcp
         let c = cfg.limit("c.exe").unwrap().cap.unwrap();
         assert_eq!(c.bytes, 1_000_000_000);
         assert_eq!(c.period, CapPeriod::Day);
+    }
+
+    #[test]
+    fn parses_the_ecn_policy() {
+        assert_eq!(OverLimitPolicy::parse("ecn"), Some(OverLimitPolicy::Ecn));
+        assert_eq!(OverLimitPolicy::parse("mark"), Some(OverLimitPolicy::Ecn));
+        assert_eq!(OverLimitPolicy::Ecn.as_str(), "ecn");
+        let (cfg, _) = Config::parse("limit a.exe = 1mbit policy ecn\n").unwrap();
+        assert_eq!(cfg.limit("a.exe").unwrap().policy, OverLimitPolicy::Ecn);
+    }
+
+    #[test]
+    fn parses_codel_params_and_rejects_a_zero_interval() {
+        let (cfg, _) = Config::parse("param codel = 5ms\n").unwrap();
+        assert_eq!(cfg.codel_target_ms, 5);
+        assert_eq!(cfg.codel_interval_ms, 100, "the RFC default interval");
+
+        let text = "param codel = 5ms\nparam codel-interval = 200ms\n";
+        let (cfg, _) = Config::parse(text).unwrap();
+        assert_eq!(cfg.codel_interval_ms, 200);
+
+        // An interval of zero would make CoDel drop every packet it sees.
+        assert!(Config::parse("param codel-interval = 0\n").is_err());
+        // And it is off unless asked for.
+        assert_eq!(Config::default().codel_target_ms, 0);
     }
 
     #[test]

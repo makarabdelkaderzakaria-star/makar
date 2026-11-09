@@ -2,8 +2,62 @@
 
 ## Unreleased
 
+### Fixed
+
+* **Three defects that only a real test run could find.** The ECN work had never
+  been executed when it was committed: CI's format and lint steps failed before
+  the tests ran, and that was mistaken for a green build. With the tests finally
+  running they found (a) the IPv6 mark written to bits 7..6 of byte 1 instead of
+  the codepoint's bits 5..4, so an IPv6 packet was "marked" in a place no
+  receiver reads; (b) the IPv4 checksum repair done with `wrapping_add`, which
+  drops the end-around carry one's-complement addition requires, leaving a
+  header that fails its own check; and (c) a retention drain that walked the
+  queue by index while removing from the front — it skipped the packet after
+  every emitted or shed one and ran past the end of the queue once CoDel shed
+  mid-batch. Each now has a test that fails without the fix.
+* **The control channel linked against the wrong DLL on Windows.** The token and
+  ACL calls are exported by `advapi32`, not `kernel32`; one `extern` block for
+  both compiled and then failed at link time.
+
 ### Added
 
+* **Local control channel (`run --ctl=PATH`).** A GUI — or any local tool — can
+  now read what the daemon is doing without a second engine and without touching
+  the driver. On Windows it is a named pipe with an explicit owner-only DACL,
+  `PIPE_REJECT_REMOTE_CLIENTS` and `FILE_FLAG_FIRST_PIPE_INSTANCE`; elsewhere a
+  Unix socket at mode `0600` with a stale-socket check. Frames are a 4-byte
+  big-endian length plus UTF-8, capped at 16 KiB before allocating. Requests:
+  `HELLO <version>`, `STATUS`, `LIMITS`, `QUIT`; a version mismatch is refused
+  with the version it wanted. Read-only by design: the packet loop publishes a
+  `Copy` snapshot once a second instead of putting a lock on the hot path, and
+  mutations wait for hot reload. `docs/IPC.md` documents the protocol and says
+  which half is untested. Tests: every response text, a client that dies
+  mid-frame, oversized/empty/truncated/non-UTF-8 frames, control characters in
+  an echoed request, and a real Unix-socket round trip.
+* **ECN marking (`policy ecn`).** Instead of delaying or dropping an over-limit
+  packet, set the CE codepoint and forward it, so the sender halves its window
+  without a retransmission. Only ECT(0)/ECT(1) frames are marked — `Not-ECT`
+  falls back to shaping, never to a silent drop — the IPv4 checksum is repaired
+  incrementally (RFC 1624), IPv6 needs no checksum work, frames that cannot be
+  parsed are left untouched, and an already-CE packet is not recomputed. The
+  engine returns `Decision::MarkEcn`; the I/O layer performs the rewrite.
+  `Snapshot::marked_ecn` counts it. Tests: both codepoints, options in the
+  header, the checksum still validating, `Not-ECT` unchanged byte for byte,
+  already-CE untouched, IPv6 traffic class with DSCP preserved, garbage and
+  truncated frames refused, and the engine's fallback to shaping.
+* **CoDel queue management (`param codel = 5ms`).** A byte budget bounds how
+  much is held but not how long it stands: a queue that is always 200 ms deep
+  drops nothing and makes everything feel slow. `Codel` (RFC 8289) now watches
+  the sojourn time of the packets we retain and, once the minimum has been above
+  the target for a whole interval, drops the packets that would arrive late
+  instead of delivering them late, tightening the spacing as
+  `interval / sqrt(count)` while the queue persists. Off by default (one
+  comparison on the drain path), 100 ms interval by default, and every drop is
+  counted in `retained_codel` and included in `retained_shed`, so the accounting
+  identity keeps holding. Tests: a burst below target is never punished, a
+  standing queue starts dropping after one interval, drops escalate, a draining
+  queue resets the episode, the scheduler sheds only when armed, and the
+  integer square root the spacing depends on.
 * **Time-of-day schedules.** `limit steam.exe = 4mbit schedule 08:00-18:00`
   (or `schedule 22:00-06:00`, which wraps midnight) enforces the limit only
   inside that **UTC** window; outside it the limit does not exist -- packets go

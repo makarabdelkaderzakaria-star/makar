@@ -20,6 +20,8 @@ Three verbs and one expression syntax. Everything after `#` is a comment.
 | `queue-size` | `1mb` | WinDivert queue memory (driver default 4 MB) |
 | `retain-budget` | `2mb` | bytes we may hold while waiting for a rate |
 | `max-retain` | `250ms` | hard ceiling on how long a packet may be held |
+| `codel` | `0` (off) | CoDel target standing-queue delay, e.g. `5ms` |
+| `codel-interval` | `100ms` | how long the queue must stay above the target first |
 | `flow-idle` | `120s` | idle time before a flow row is swept |
 | `identity-ttl` | `30s` | how long a PID → name mapping is trusted |
 | `batch-max` | `64` | packets asked for per receive (clamped to 255) |
@@ -29,6 +31,32 @@ Three verbs and one expression syntax. Everything after `#` is a comment.
 
 Durations accept `ms`, `s`, or a bare number of milliseconds. Sizes accept
 `kb`, `mb`, `gb` or a bare number of bytes.
+
+### CoDel: bound the delay you add, not just the bytes you hold
+
+A byte budget with a 250 ms ceiling can still hold a queue that is always
+200 ms deep: nothing is dropped, every packet arrives, and every conversation
+feels slow. That is bufferbloat, and it is invisible to a drop counter. CoDel
+(RFC 8289) watches the sojourn time of the packets *we* hold, and when the
+minimum has stayed above a target for a whole interval — a standing queue, not
+a burst — it drops the packets that would arrive late instead of delivering
+them late. Drops then get closer together while the queue stays deep
+(`interval / sqrt(count)`).
+
+```text
+param codel = 5ms            # off unless you ask; 5 ms is the usual target
+param codel-interval = 100ms # how long it must persist before acting
+```
+
+* CoDel is **off by default** and costs one comparison when it is off, so every
+  configuration written before it existed behaves exactly as it did.
+* It does not replace the rate limits and it does not detect congestion on the
+  link you do not own: it bounds the delay **this program** adds by buffering.
+* Drops are counted separately (`retained_codel` in the snapshot, and part of
+  `retained_shed` so the accounting identity keeps holding) — a silent drop is
+  a bug, not an optimisation.
+* A packet that has already waited more than `max-retain` is shed before CoDel
+  ever sees it; CoDel acts on the packets that are still within the ceiling.
 
 **Why the defaults are lower than the driver's**: a shaper that queues 2 s of
 packets is a shaper that causes retransmissions, and a retransmission spends the
@@ -55,6 +83,7 @@ limit updater.exe = 20mbit  burst 256kb schedule 22:00-06:00
 | `shape` *(default)* | delay packets until they fit | **1×** — nothing is ever retransmitted |
 | `drop` | drop over-limit outbound packets | 2× — TCP retransmits them |
 | `drop-inbound` | drop over-limit inbound packets | ~1× — the peer sees a zero window and slows down |
+| `ecn` | mark over-limit packets CE and forward them | **1×** — the sender halves its window without a retransmission |
 
 * `per-flow` (or `scope flow`): one bucket **per connection** instead of one
   per process. A browser downloading a 4K stream no longer starves its own DNS
@@ -62,6 +91,30 @@ limit updater.exe = 20mbit  burst 256kb schedule 22:00-06:00
   The cost is one `u64` in the flow table row that already exists — no second
   table, no allocation. `scope process` is the default and is what every
   previous version did.
+
+### ECN marking: `policy ecn`
+
+When the transport negotiated ECN (both ends set ECT in the IP header), the
+congestion signal does not have to cost a packet: set the CE codepoint, forward
+it, and the receiver echoes it back so the sender halves its window without
+retransmitting anything.
+
+```text
+limit chrome.exe = 8mbit burst 64kb policy ecn
+```
+
+* Only **ECT(0)/ECT(1)** packets are marked. A `Not-ECT` packet has no way to
+  carry the signal, so it falls back to shaping — never to a silent drop, and
+  never to a corrupted header.
+* The IPv4 header checksum is repaired incrementally (RFC 1624); IPv6 needs no
+  checksum change. Frames this program cannot parse are left byte-for-byte
+  untouched.
+* An already-CE packet is not recomputed and not counted twice.
+* `snapshot.marked_ecn` counts the marks, and `netrocket tui` shows them; the
+  engine only *decides* to mark, the I/O layer performs the rewrite.
+* Requires an ECN-capable peer. On a network that strips the ECT bits the limit
+  degrades to ordinary shaping, which is the point: the failure mode is "slower"
+  rather than "broken".
 
 ### Time-of-day schedules: `schedule <window>`
 
@@ -172,8 +225,9 @@ rule limit=browser.exe : proc browser.exe
 param queue-time   = 400ms
 param max-retain   = 250ms
 param retain-budget = 2mb
+param codel        = 5ms
 
-limit chrome.exe = 8mbit  burst 64kb
+limit chrome.exe = 8mbit  burst 64kb policy ecn
 limit steam.exe  = 20mbit burst 256kb
 limit backup.exe = 2mbit  burst 32kb policy drop
 limit browser.exe = 8mbit burst 64kb per-flow

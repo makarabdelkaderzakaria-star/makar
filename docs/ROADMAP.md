@@ -97,16 +97,21 @@ Still open:
       reason `cap`. Tests: budget exhaustion, daily rollover, a monthly cap
       surviving the next day, restoring a counter only within its own period,
       and an uncapped limit never counting a cap drop.
-* [ ] CoDel-style queue management for the "no limit configured but the link is
-      congested" case — complementary to GCRA, not a replacement.
-* [ ] ECN marking instead of dropping, where the peer supports it.
+* [x] CoDel queue management: bounds the delay our own buffering adds, which is
+      the part of "the link is congested" this program is responsible for.
+      `param codel = 5ms`, off by default.
+* [x] ECN marking instead of dropping, where the peer supports it:
+      `policy ecn`, CE marking with the IPv4 checksum repaired incrementally and
+      a shaping fallback for `Not-ECT` traffic.
 
 ## 1.0 — interface
 
-* [ ] Local IPC so a GUI or another tool can query and change limits without
-      restarting: Windows named pipe with an explicit DACL, length-prefixed
-      frames, versioned. The original's pipe grants `BuiltinUsers` ReadWrite;
-      that is broader than necessary and will not be copied.
+* [x] Local IPC so a GUI or another tool can query limits without restarting:
+      Windows named pipe with an explicit owner-only DACL, Unix socket at `0600`,
+      length-prefixed versioned frames, `run --ctl=PATH`. The original's pipe
+      grants `BuiltinUsers` ReadWrite; that is broader than necessary and was not
+      copied. Read-only until hot reload gives the engine a safe way to swap
+      state (`docs/IPC.md`).
 * [ ] Hot rule reload without dropping flows.
 * [ ] A real TUI (the current status display is deliberately line-based).
 

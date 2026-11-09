@@ -22,12 +22,16 @@
 
 use crate::calendar::Calendar;
 use crate::config::{CapPeriod, Config, LimitScope, Limits, OverLimitPolicy, Window};
+use crate::ecn;
 use crate::flow::{FlowKey, FlowTable};
 use crate::gcra::Gcra;
 use crate::identity::{IdentityCache, Lookup, ProcKey, Resolver};
 use crate::packet::{Direction, PacketView, Protocol};
 use crate::rules::{Action, CompiledRules, RuleSet};
 use crate::scheduler::{Admit, Scheduler, Shed};
+
+/// Nanoseconds in a millisecond; config durations are in ms.
+const NS_PER_MS: u64 = 1_000_000;
 use crate::stats::{Counters, Snapshot};
 
 /// What the engine wants done with one packet.
@@ -42,6 +46,9 @@ pub enum Decision {
     },
     /// Drop it (and why).
     Drop(DropReason),
+    /// Forward it with the CE codepoint set (RFC 3168): the I/O layer owns the
+    /// bytes, so it applies `ecn::mark_ce` before sending.
+    MarkEcn,
 }
 
 /// Why a packet was dropped.
@@ -144,7 +151,11 @@ impl<const FLOWS: usize> Engine<FLOWS> {
     /// Build an engine from a validated configuration.
     #[must_use]
     pub fn new(config: Config) -> Self {
-        let scheduler = Scheduler::new(config.retain_budget_bytes, config.max_retain_ms);
+        let mut scheduler = Scheduler::new(config.retain_budget_bytes, config.max_retain_ms);
+        scheduler.set_codel(
+            config.codel_target_ms.saturating_mul(NS_PER_MS),
+            config.codel_interval_ms.saturating_mul(NS_PER_MS),
+        );
         let identities = IdentityCache::new(1024, 64 * 1024, config.identity_ttl_ms);
         let mut engine = Self {
             config,
@@ -580,7 +591,19 @@ impl<const FLOWS: usize> Engine<FLOWS> {
                     limit: Some(limit_idx),
                 }
             }
-            OverLimitPolicy::Shape => {
+            // ECN: if the transport negotiated it, mark and forward -- the
+            // sender learns about the congestion without a retransmission.
+            // Everything else (Not-ECT, unparseable) is shaped as usual, so a
+            // packet is never silently lost because it was not ECN-capable.
+            OverLimitPolicy::Ecn if ecn::is_ecn_capable(pkt.raw) => {
+                self.stats.marked_ecn += 1;
+                Outcome {
+                    decision: Decision::MarkEcn,
+                    flow: Some(*key),
+                    limit: Some(limit_idx),
+                }
+            }
+            OverLimitPolicy::Shape | OverLimitPolicy::Ecn => {
                 let due = now_ns.saturating_add(wait);
                 let flow_tag = (li as u32) << 16 | (key.pid & 0xFFFF);
                 match self.scheduler.admit(pkt.raw, token, due, now_ns, flow_tag) {
@@ -992,6 +1015,7 @@ mod tests {
                     now = due_ns;
                 }
                 Decision::Drop(_) => panic!("should not drop while shaping"),
+                Decision::MarkEcn => panic!("no ECN policy here"),
             }
         }
         assert!(retained > 10, "shaping did nothing: {retained} retained");
@@ -1024,6 +1048,10 @@ mod tests {
                     decision: Decision::Drop(_),
                     ..
                 } => {}
+                Outcome {
+                    decision: Decision::MarkEcn,
+                    ..
+                } => panic!("no ECN policy here"),
             }
         }
         let seconds = now as f64 / S as f64;
@@ -1231,6 +1259,7 @@ mod tests {
                     now = due_ns;
                 }
                 Decision::Drop(_) => panic!("shape policy must never drop"),
+                Decision::MarkEcn => panic!("no ECN policy here"),
             }
         }
         assert!(
@@ -1446,5 +1475,79 @@ mod tests {
         assert_eq!(decision_of(&mut e, &f, 4), Decision::SendNow);
         assert_eq!(decision_of(&mut e, &f, 5), Decision::SendNow);
         assert_eq!(decision_of(&mut e, &f, 6), Decision::Drop(DropReason::Cap));
+    }
+
+    // -----------------------------------------------------------------------
+    // CoDel
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn the_engine_arms_codel_only_when_the_config_asks() {
+        let (off, _) = Config::parse("param max-retain = 250ms\n").unwrap();
+        assert!(!Engine::<1024>::new(off).scheduler_mut().codel_enabled());
+
+        let (on, _) = Config::parse("param codel = 5ms\n").unwrap();
+        assert!(Engine::<1024>::new(on).scheduler_mut().codel_enabled());
+    }
+
+    // -----------------------------------------------------------------------
+    // ECN
+    // -----------------------------------------------------------------------
+
+    /// The same 1500-byte TCP frame as [`conn`], with an ECN codepoint in the
+    /// IPv4 TOS byte. The engine does not verify checksums (it is a shaper, not
+    /// a receiver), so flipping the two ECN bits is enough here; `ecn`'s own
+    /// tests check the checksum arithmetic.
+    fn conn_ecn(src_port: u16, codepoint: u8) -> Vec<u8> {
+        let mut f = conn(src_port);
+        f[1] = (f[1] & !0b11) | codepoint;
+        f
+    }
+
+    #[test]
+    fn an_ecn_limit_marks_the_packet_that_goes_over() {
+        let mut e = spec_engine("burst 1500 policy ecn");
+        let f = conn_ecn(51515, ecn::codepoint::ECT0);
+        assert!(ecn::is_ecn_capable(&f), "the fixture must be ECN-capable");
+
+        // The configured burst is raised to four MTUs, which at 8 MB/s covers
+        // exactly `BURST_FRAMES` frames at `now = 0`. The one after that is over
+        // the limit, and an ECN-capable transport wants a mark, not a delay.
+        for _ in 0..BURST_FRAMES {
+            assert_eq!(decision_of(&mut e, &f, 0), Decision::SendNow);
+        }
+        assert_eq!(decision_of(&mut e, &f, 0), Decision::MarkEcn);
+    }
+
+    #[test]
+    fn an_ecn_mark_is_counted_and_retains_nothing() {
+        let mut e = spec_engine("burst 1500 policy ecn");
+        let f = conn_ecn(51515, ecn::codepoint::ECT0);
+        for _ in 0..BURST_FRAMES {
+            decision_of(&mut e, &f, 0);
+        }
+        assert_eq!(decision_of(&mut e, &f, 0), Decision::MarkEcn);
+        assert_eq!(e.snapshot().marked_ecn, 1);
+        assert_eq!(e.snapshot().retained, 0, "marking must not retain");
+    }
+
+    #[test]
+    fn an_ecn_limit_shapes_a_packet_that_cannot_carry_the_signal() {
+        let mut e = spec_engine("burst 1500 policy ecn");
+        let f = conn_ecn(51515, ecn::codepoint::ECT0);
+        for _ in 0..BURST_FRAMES {
+            decision_of(&mut e, &f, 0);
+        }
+
+        // A Not-ECT packet has no way to carry the signal, so `ecn` falls back
+        // to shaping instead of dropping or corrupting it.
+        let plain = conn(51516);
+        assert!(!ecn::is_ecn_capable(&plain));
+        let out = decision_of(&mut e, &plain, 0);
+        assert!(
+            matches!(out, Decision::Retain { .. }),
+            "a Not-ECT packet must be shaped, got {out:?}"
+        );
+        assert_eq!(e.snapshot().marked_ecn, 0, "and it must not be counted");
     }
 }

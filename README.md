@@ -14,7 +14,7 @@ built around three rules:
    enough for TCP to retransmit it, and account for every single byte.
 
 > **Status — 0.2.0.** Core engine, CLI, simulator and tests are complete
-> (148 tests on Linux, 155 on Windows). The Windows backend now covers the whole path — WinDivert
+> (184 tests on Linux, 190 on Windows). The Windows backend now covers the whole path — WinDivert
 > receive/send, FLOW attribution, start-up endpoint snapshot, process identity —
 > **compiles and lints clean for `x86_64-pc-windows-msvc` in CI**, and its ABI
 > decisions plus the table decoder are unit-tested on every platform.
@@ -63,6 +63,7 @@ netrocket run --config=netrocket.conf
 |---|---|---|
 | `run` | yes (Windows) | intercept and shape traffic |
 | `run --monitor` | yes (Windows) | count traffic, divert nothing (`WINDIVERT_FLAG_SNIFF`) |
+| `run --ctl=PATH` | yes (Windows) | also serve a read-only control channel for a UI (`docs/IPC.md`) |
 | `doctor` | no | check the machine can run `run`; diverts nothing |
 | `simulate` | no | replay deterministic synthetic traffic through the engine |
 | `bench` | no | measure the pipeline; `--stream` for the memory-bound variant |
@@ -91,7 +92,10 @@ bucket shared by every flow the process opens. `cap` is a byte budget that
 resets at 00:00 UTC daily or monthly — the metered-connection case — and its
 counter survives a restart. `schedule 08:00-18:00` makes a limit exist only
 during that UTC window (it may wrap midnight), which is what "do not saturate
-the line while I am working" actually needs.
+the line while I am working" actually needs. `param codel = 5ms` bounds the
+delay the retention buffer itself adds, so a saturated line does not turn into
+a 200 ms-deep queue that drops nothing and helps nobody. `policy ecn` marks
+congestion into the packet instead of spending a retransmission on it.
 
 Full reference: [`docs/CONFIG.md`](docs/CONFIG.md).
 
@@ -114,6 +118,7 @@ happens in that path. Details: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 | [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md) | measured numbers, the machine, and what is *not* measured |
 | [`docs/SECURITY.md`](docs/SECURITY.md) | threat model, privileges, bounds, licensing |
 | [`docs/CONFIG.md`](docs/CONFIG.md) | every parameter, limit and rule |
+| [`docs/IPC.md`](docs/IPC.md) | the control channel a UI talks to, and what is untested |
 | [`docs/ROADMAP.md`](docs/ROADMAP.md) | what is next and what is deliberately not planned |
 | [`docs/WINDOWS-BRINGUP.md`](docs/WINDOWS-BRINGUP.md) | ordered checklist for the first real Windows run |
 | [`LIMITATIONS.md`](LIMITATIONS.md) | what has **not** been proven, in one place |
@@ -121,7 +126,7 @@ happens in that path. Details: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 ## Tests
 
 ```bash
-cargo test                                        # 148 tests; 155 on Windows
+cargo test                                        # 184 tests; 190 on Windows
 cargo clippy --target x86_64-pc-windows-msvc -D warnings   # the Windows backend
 ```
 

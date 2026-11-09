@@ -49,6 +49,8 @@ pub struct Counters {
     pub dropped_quota: u64,
     /// Dropped because a limit's byte budget (cap) is spent for this period.
     pub dropped_cap: u64,
+    /// Forwarded with the CE codepoint set instead of being delayed or dropped.
+    pub marked_ecn: u64,
     /// Dropped as unparseable (still forwarded; counted for visibility).
     pub dropped_malformed: u64,
     /// New flow rows created.
@@ -109,6 +111,8 @@ pub struct Snapshot {
     pub dropped_quota: u64,
     /// See [`Counters::dropped_cap`].
     pub dropped_cap: u64,
+    /// See [`Counters::marked_ecn`].
+    pub marked_ecn: u64,
     /// Live flows.
     pub flows: u64,
     /// Flow table capacity.
@@ -129,6 +133,9 @@ pub struct Snapshot {
     pub retained_shed: u64,
     /// Packets still sitting in the retention buffer right now.
     pub retained_left: u64,
+    /// Of `retained_shed`, how many CoDel dropped on purpose because the queue
+    /// was standing above its target (0 when CoDel is off).
+    pub retained_codel: u64,
 }
 
 impl Snapshot {
@@ -215,17 +222,22 @@ impl Counters {
             dropped_budget: self.dropped_budget,
             dropped_quota: self.dropped_quota,
             dropped_cap: self.dropped_cap,
+            marked_ecn: self.marked_ecn,
             flows: flows.len() as u64,
             flows_capacity: flows.capacity() as u64,
             retained_bytes: scheduler.held_bytes(),
             retained_peak: scheduler.max_held_bytes(),
             max_wait_ns: scheduler.max_wait_ns(),
             retain_budget: scheduler.budget(),
+            // CoDel drops come out of the same buffer, so they belong in the
+            // same total: the accounting identity in the field docs must keep
+            // holding with CoDel armed or off.
             retained_shed: {
                 let (a, b, c) = scheduler.shed();
-                a + b + c
+                a + b + c + scheduler.codel_drops()
             },
             retained_left: scheduler.len() as u64,
+            retained_codel: scheduler.codel_drops(),
         }
     }
 }

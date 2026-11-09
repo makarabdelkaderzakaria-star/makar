@@ -138,6 +138,22 @@ daemon and the simulator cannot disagree about what time it is).
   identity `packets == forwarded + dropped + shed + still_held` is asserted in
   tests, not just documented.
 
+### ECN: the engine decides, the I/O layer writes
+
+`Decision::MarkEcn` keeps the packet path read-only: the engine parses the
+frame, checks the ECN codepoint, and returns a decision, while `nr-app` owns the
+bytes and calls `ecn::mark_ce` before handing them back to the driver. Keeping
+the rewrite out of `nr-core` also keeps the checksum arithmetic unit-testable on
+every platform, which is the only way to be sure about a byte we cannot see.
+
+### CoDel on the way out
+
+The drain step consults `Codel` per packet, using the sojourn time the packet
+has *already* waited (see `codel.rs`). It is checked at emission rather than
+admission because the question is not "is this packet slow" but "is the queue
+still standing" — and only the queue's own history can answer that. A packet
+CoDel refuses is removed from the buffer and counted, never silently lost.
+
 No timer thread with a fixed heartbeat: `next_due_ns()` returns the exact
 instant to wake, so an idle daemon is genuinely idle. The original armed a 1 ms
 timer that scanned every queue a thousand times a second.
@@ -224,6 +240,21 @@ The engine is single-threaded by construction: no mutex anywhere on the packet
 path, and statistics are plain counters that are only made visible through a
 `Copy` snapshot. This is the structural reason there is no lock contention to
 tune later.
+
+### The control channel is a reader, not a peer
+
+`run --ctl=PATH` adds one more thread, and the diagram above does not change:
+
+```
+[packet thread] ──snapshot (Copy), once a second──► Mutex<Snapshot> ──► [ctl thread]
+```
+
+The mutex is taken by the packet thread once per tick and never held across
+I/O; the control thread copies the snapshot out and talks to the client. A UI
+that stops reading, or a client that dies mid-frame, cannot slow a packet. That
+is also why the channel is read-only: letting a second thread *write* to the
+engine would put a lock on the path this design exists to keep clear. Protocol:
+[`IPC.md`](IPC.md).
 
 ## Configuration
 

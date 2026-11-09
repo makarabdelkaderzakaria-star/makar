@@ -41,6 +41,7 @@ pub fn summary(snap: &Snapshot, wall_ms: u64) -> String {
          \x20 shaped           {}\n\
          \x20 dropped          {} (blocked {}, policy {}, too-late {}, budget {}, quota {},\n\
          \x20                  cap {})\n\
+         \x20 marked (ecn)     {}\n\
          \x20 retention peak   {}\n\
          \x20 longest wait     {:.2} ms\n",
         snap.packets,
@@ -55,6 +56,7 @@ pub fn summary(snap: &Snapshot, wall_ms: u64) -> String {
         snap.dropped_budget,
         snap.dropped_quota,
         snap.dropped_cap,
+        snap.marked_ecn,
         human_bytes(snap.retained_peak),
         snap.max_wait_ns as f64 / 1e6,
     )
