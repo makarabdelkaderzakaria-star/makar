@@ -35,10 +35,10 @@
 //! second and refuses mutations with a clear error until hot reload lands. A
 //! control channel that can only lie about changing things would be worse than
 //! none.
-
-// Only the Windows daemon calls `bind` at run time. The tests drive it on every
-// platform, so on a Unix build rustc would otherwise report it as dead code —
-// the same reason `caps.rs` carries this attribute.
+//!
+//! Only the Windows daemon calls [`bind`] at run time. The tests drive it on
+//! every platform, so on a Unix build rustc would otherwise report it as dead
+//! code — the same reason `caps.rs` carries the attribute below.
 
 #![cfg_attr(not(windows), allow(dead_code))]
 
@@ -527,7 +527,9 @@ mod win_pipe {
                         sacl: std::ptr::null_mut(),
                         dacl: std::ptr::null_mut(),
                     }),
-                    acl: Box::new(AclBuffer { bytes: [0u8; ACL_BUF_BYTES] }),
+                    acl: Box::new(AclBuffer {
+                        bytes: [0u8; ACL_BUF_BYTES],
+                    }),
                     sid: std::ptr::null_mut(),
                     token_bytes,
                     token_layout,

@@ -1015,6 +1015,7 @@ mod tests {
                     now = due_ns;
                 }
                 Decision::Drop(_) => panic!("should not drop while shaping"),
+                Decision::MarkEcn => panic!("no ECN policy here"),
             }
         }
         assert!(retained > 10, "shaping did nothing: {retained} retained");
@@ -1254,6 +1255,7 @@ mod tests {
                     now = due_ns;
                 }
                 Decision::Drop(_) => panic!("shape policy must never drop"),
+                Decision::MarkEcn => panic!("no ECN policy here"),
             }
         }
         assert!(
