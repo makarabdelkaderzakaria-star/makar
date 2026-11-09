@@ -134,11 +134,14 @@ function inject(blob, runtime) {
   copyFileSync(runtime, OUT);
   chmodSync(OUT, 0o755);
 
-  const postject = join(root, 'node_modules', '.bin', process.platform === 'win32' ? 'postject.cmd' : 'postject');
+  // postject is run through node rather than through its bin shim: a .cmd
+  // shim cannot be spawned directly on Windows without a shell.
+  const postject = join(root, 'node_modules', 'postject', 'dist', 'cli.js');
   if (!existsSync(postject)) {
     throw new Error('postject is missing — run: npm install');
   }
-  execFileSync(postject, [
+  execFileSync(process.execPath, [
+    postject,
     OUT,
     'NODE_SEA_BLOB',
     blob,

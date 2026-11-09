@@ -37,16 +37,22 @@ jobs:
       - name: build the script and the executable
         shell: pwsh
         run: |
+          New-Item -ItemType Directory -Path "$env:RUNNER_TEMP\logs" -Force | Out-Null
           Set-Location raqib
-          node scripts/build.mjs
+          node scripts/build.mjs *>&1 | Tee-Object -FilePath "$env:RUNNER_TEMP\logs\build.log"
+          if ($LASTEXITCODE -ne 0) { throw "the script build failed" }
           # The base runtime is the very node that is running this step, so the
           # executable carries the same JavaScript engine as the machine it
           # was built on.
-          node scripts/build-sea.mjs --node (node -p "process.execPath")
+          node scripts/build-sea.mjs --node (node -p "process.execPath") *>&1 |
+            Tee-Object -FilePath "$env:RUNNER_TEMP\logs\sea.log"
+          if ($LASTEXITCODE -ne 0) { throw "the executable build failed" }
 
       - name: build the fixtures the tests run against
         shell: pwsh
-        run: node raqib/scripts/make-fixtures.mjs "$env:RUNNER_TEMP\fixtures"
+        run: |
+          node raqib/scripts/make-fixtures.mjs "$env:RUNNER_TEMP\fixtures" *>&1 |
+            Tee-Object -FilePath "$env:RUNNER_TEMP\logs\fixtures.log"
 
       - name: fetch a real Brave for Windows
         shell: pwsh
@@ -167,17 +173,22 @@ jobs:
           }
           Write-Host "published sha256: $sha"
 
-      - name: keep the results in the repository
+      - name: keep the results and the logs in the repository
         if: always()
         shell: pwsh
         run: |
+          New-Item -ItemType Directory -Path 'raqib\ci-results' -Force | Out-Null
           if (Test-Path -LiteralPath 'raqib\dist\results.json') {
-            New-Item -ItemType Directory -Path 'raqib\ci-results' -Force | Out-Null
             Copy-Item -LiteralPath 'raqib\dist\results.json' -Destination 'raqib\ci-results\results.json' -Force
-            Copy-Item -LiteralPath 'raqib\dist\SHA256' -Destination 'raqib\ci-results\SHA256' -Force
-            git config user.email 'ci@raqib.local'
-            git config user.name 'raqib ci'
-            git add raqib/ci-results
-            git commit -m "ci: the result of testing the Windows executable" --allow-empty
-            git push origin HEAD:raqib-ci-results --force
           }
+          if (Test-Path -LiteralPath 'raqib\dist\SHA256') {
+            Copy-Item -LiteralPath 'raqib\dist\SHA256' -Destination 'raqib\ci-results\SHA256' -Force
+          }
+          if (Test-Path -LiteralPath "$env:RUNNER_TEMP\logs") {
+            Copy-Item -Path "$env:RUNNER_TEMP\logs\*.log" -Destination 'raqib\ci-results\' -Force -ErrorAction SilentlyContinue
+          }
+          git config user.email 'ci@raqib.local'
+          git config user.name 'raqib ci'
+          git add -f raqib/ci-results
+          git commit -m "ci: the result of testing the Windows executable" --allow-empty
+          git push origin HEAD:raqib-ci-results --force
