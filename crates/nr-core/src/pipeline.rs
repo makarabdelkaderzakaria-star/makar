@@ -1390,7 +1390,7 @@ mod tests {
         // back-to-back frames cannot go out at the same instant.
         e.set_calendar(Calendar::from_day_index(20_766).at_minute(9 * 60));
         let held = (0..6)
-            .filter(|token| !decision_of(&mut e, &f, *token).is_send_now())
+            .filter(|token| decision_of(&mut e, &f, *token) != Decision::SendNow)
             .count();
         assert!(held > 0, "the limit must bite at 09:00");
 
@@ -1398,10 +1398,7 @@ mod tests {
         e.set_calendar(Calendar::from_day_index(20_766).at_minute(20 * 60));
         for token in 6..12 {
             let decision = decision_of(&mut e, &f, token);
-            assert!(
-                decision.is_send_now(),
-                "at 20:00 token {token} was {decision:?}"
-            );
+            assert_eq!(decision, Decision::SendNow, "token {token} at 20:00");
         }
     }
 
@@ -1415,15 +1412,15 @@ mod tests {
 
         e.set_calendar(inside);
         let held = (0..6)
-            .filter(|token| !decision_of(&mut e, &f, *token).is_send_now())
+            .filter(|token| decision_of(&mut e, &f, *token) != Decision::SendNow)
             .count();
         assert!(held > 0, "23:00 is inside an overnight window");
 
         // 03:00 is still inside, 12:00 is not.
         e.set_calendar(before);
-        assert!(decision_of(&mut e, &f, 6).is_send_now());
+        assert_eq!(decision_of(&mut e, &f, 6), Decision::SendNow);
         e.set_calendar(outside);
-        assert!(decision_of(&mut e, &f, 7).is_send_now());
+        assert_eq!(decision_of(&mut e, &f, 7), Decision::SendNow);
     }
 
     #[test]

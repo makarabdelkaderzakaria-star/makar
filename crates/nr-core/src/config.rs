@@ -195,10 +195,7 @@ impl Window {
         if start_min == end_min || start_min >= MINUTES_PER_DAY || end_min >= MINUTES_PER_DAY {
             return None;
         }
-        Some(Self {
-            start_min,
-            end_min,
-        })
+        Some(Self { start_min, end_min })
     }
 
     /// Parse `08:00-18:00`, `8-18`, or `22:30-06:15`.
