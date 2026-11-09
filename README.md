@@ -63,6 +63,7 @@ netrocket run --config=netrocket.conf
 |---|---|---|
 | `run` | yes (Windows) | intercept and shape traffic |
 | `run --monitor` | yes (Windows) | count traffic, divert nothing (`WINDIVERT_FLAG_SNIFF`) |
+| `run --ctl=PATH` | yes (Windows) | also serve a read-only control channel for a UI (`docs/IPC.md`) |
 | `doctor` | no | check the machine can run `run`; diverts nothing |
 | `simulate` | no | replay deterministic synthetic traffic through the engine |
 | `bench` | no | measure the pipeline; `--stream` for the memory-bound variant |
@@ -117,6 +118,7 @@ happens in that path. Details: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 | [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md) | measured numbers, the machine, and what is *not* measured |
 | [`docs/SECURITY.md`](docs/SECURITY.md) | threat model, privileges, bounds, licensing |
 | [`docs/CONFIG.md`](docs/CONFIG.md) | every parameter, limit and rule |
+| [`docs/IPC.md`](docs/IPC.md) | the control channel a UI talks to, and what is untested |
 | [`docs/ROADMAP.md`](docs/ROADMAP.md) | what is next and what is deliberately not planned |
 | [`docs/WINDOWS-BRINGUP.md`](docs/WINDOWS-BRINGUP.md) | ordered checklist for the first real Windows run |
 | [`LIMITATIONS.md`](LIMITATIONS.md) | what has **not** been proven, in one place |

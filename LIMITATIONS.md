@@ -18,6 +18,14 @@ the reader a list of what it has *not* proven.
 > limits are unit-tested, but like everything else in the engine they have not
 > been measured on hardware.
 >
+> **This file changed again after the control channel landed.** `run --ctl=PATH`
+> serves a read-only protocol over a Windows named pipe or a Unix socket. The
+> protocol, the framing, the refusals and a real Unix-socket round trip are
+> tested on every platform; the **Windows named-pipe path has never executed**
+> — there is no Windows machine in this environment. It is type-checked by the
+> Windows target in CI and blocked on the same hardware as the rest of the
+> backend. It is also read-only on purpose: nothing over it can change a limit.
+>
 > **This file changed at 0.2.0.** The start-up endpoint snapshot is
 > implemented and its decoder is unit-tested on Linux, the `run --monitor`
 > defect is fixed, and `netrocket doctor` exists. The claim is still **not** "it

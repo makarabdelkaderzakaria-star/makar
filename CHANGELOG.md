@@ -4,6 +4,19 @@
 
 ### Added
 
+* **Local control channel (`run --ctl=PATH`).** A GUI — or any local tool — can
+  now read what the daemon is doing without a second engine and without touching
+  the driver. On Windows it is a named pipe with an explicit owner-only DACL,
+  `PIPE_REJECT_REMOTE_CLIENTS` and `FILE_FLAG_FIRST_PIPE_INSTANCE`; elsewhere a
+  Unix socket at mode `0600` with a stale-socket check. Frames are a 4-byte
+  big-endian length plus UTF-8, capped at 16 KiB before allocating. Requests:
+  `HELLO <version>`, `STATUS`, `LIMITS`, `QUIT`; a version mismatch is refused
+  with the version it wanted. Read-only by design: the packet loop publishes a
+  `Copy` snapshot once a second instead of putting a lock on the hot path, and
+  mutations wait for hot reload. `docs/IPC.md` documents the protocol and says
+  which half is untested. Tests: every response text, a client that dies
+  mid-frame, oversized/empty/truncated/non-UTF-8 frames, control characters in
+  an echoed request, and a real Unix-socket round trip.
 * **ECN marking (`policy ecn`).** Instead of delaying or dropping an over-limit
   packet, set the CE codepoint and forward it, so the sender halves its window
   without a retransmission. Only ECT(0)/ECT(1) frames are marked — `Not-ECT`

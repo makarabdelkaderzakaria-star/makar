@@ -464,6 +464,29 @@ pub fn run(loaded: crate::configio::Loaded, args: &RunArgs) -> Result<(), String
     let mut engine = Engine::<8192>::new(config.clone());
     engine.set_rules(loaded.rules);
 
+    // Control channel for a local UI. The packet path never touches it: the
+    // loop below drops a fresh snapshot into the shared cell once a second and
+    // the serving thread does the rest.
+    let ctl = match args.ctl.as_deref() {
+        Some(path) => {
+            let listener = crate::ipc::bind(path)
+                .map_err(|e| format!("control channel {}: {e}", path.display()))?;
+            let shared = crate::ipc::Shared::new(config.clone(), engine.snapshot());
+            let published = Arc::clone(&shared);
+            eprintln!("control channel: {}", path.display());
+            std::thread::Builder::new()
+                .name("nr-ctl".to_owned())
+                .spawn(move || {
+                    if let Err(e) = crate::ipc::serve_listener(listener, shared) {
+                        eprintln!("control channel stopped: {e}");
+                    }
+                })
+                .map_err(|e| format!("control channel thread: {e}"))?;
+            Some(published)
+        }
+        None => None,
+    };
+
     // Data caps: the counters live next to the configuration file, so a restart
     // does not hand back a budget that was already spent today.
     let caps_path = crate::caps::path_for(&args.config);
@@ -721,6 +744,9 @@ pub fn run(loaded: crate::configio::Loaded, args: &RunArgs) -> Result<(), String
                 snap.dropped_total(),
                 unknown_flows
             );
+            if let Some(shared) = &ctl {
+                shared.publish(snap);
+            }
         }
     }
 

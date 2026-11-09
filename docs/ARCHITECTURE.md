@@ -241,6 +241,21 @@ path, and statistics are plain counters that are only made visible through a
 `Copy` snapshot. This is the structural reason there is no lock contention to
 tune later.
 
+### The control channel is a reader, not a peer
+
+`run --ctl=PATH` adds one more thread, and the diagram above does not change:
+
+```
+[packet thread] ──snapshot (Copy), once a second──► Mutex<Snapshot> ──► [ctl thread]
+```
+
+The mutex is taken by the packet thread once per tick and never held across
+I/O; the control thread copies the snapshot out and talks to the client. A UI
+that stops reading, or a client that dies mid-frame, cannot slow a packet. That
+is also why the channel is read-only: letting a second thread *write* to the
+engine would put a lock on the path this design exists to keep clear. Protocol:
+[`IPC.md`](IPC.md).
+
 ## Configuration
 
 Plain text, parsed by a hand-written parser (`config.rs`), no `serde`.
