@@ -93,6 +93,25 @@ table is full, the packet falls back to the shared lane: shaping continues, just
 pooled with the process. Charging still happens at **emission**, which is why
 `Engine::on_emitted` takes the flow key as well as the limit index.
 
+## Caps: bytes per period, checked before the rate
+
+A data cap is a second budget on the same limit, and it lives in `CapState`
+(one `Copy` row per configured limit, aligned with the lane vector so a rule's
+limit index is all the lookup needs). It is charged on **admission**, before the
+GCRA, for one reason: a packet that the retention buffer later sheds was still
+demanded, and a metered link bills for what the user asked for, not for what we
+managed to send in time. The order also matters for the diagnosis: a spent
+budget is not a speed problem, so it must not be reported as one.
+
+The period is a UTC day or month, decoded from the Unix clock by
+`calendar.rs` (Hinnant's `civil_from_days`) instead of a date dependency — the
+same reason the config parser hand-rolls its own sizes. `Engine::set_calendar`
+is called once a second by the driver loop, so a laptop that resumes from
+suspend, or a clock corrected by NTP, rolls the budget over instead of keeping
+it spent forever. The counters are persisted by `nr-app` in `<config>.caps`,
+stamped with the period they belong to; a stamp from another period is ignored
+on load, so yesterday's spend can never be charged to today.
+
 ## Retention: bounded, short, and honest
 
 `Scheduler` (`scheduler.rs`) holds packets that a shaper cannot send yet.

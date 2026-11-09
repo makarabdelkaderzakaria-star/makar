@@ -66,6 +66,7 @@ impl fmt::Display for ConfigError {
         match self {
             Self::ZeroRate => f.write_str("rate must be > 0"),
             Self::BurstTooSmall { burst } => write!(f, "burst {burst} is below one MTU"),
+            Self::ZeroCap => f.write_str("cap must be > 0 bytes"),
             Self::BudgetTooSmall { bytes } => write!(f, "budget {bytes} is below one MTU"),
             Self::EmptyName => f.write_str("limit name must not be empty"),
             Self::UnknownParam(k) => write!(f, "unknown parameter `{k}`"),

@@ -97,6 +97,7 @@ param batch-max = 64
 
 # --- limits ---------------------------------------------------------------
 # limit <name> = <rate> [burst <bytes>] [policy shape|drop|drop-inbound] [per-flow]
+#                 [cap <bytes>/day|<bytes>/month]
 #
 # policy shape         delay packets until they fit (no retransmissions)
 # policy drop          drop over-limit packets (TCP retransmits: wasteful)
@@ -106,9 +107,15 @@ param batch-max = 64
 #                      A browser with one tab on a 4K stream no longer starves
 #                      its own DNS lookups. `scope process` is the default.
 #
+# cap <bytes>/<period> a byte budget for the limit, reset at 00:00 UTC every
+#                      day or on the first of the month. Bytes count in both
+#                      directions. When it is spent, matching packets are
+#                      dropped until the period rolls over; the counter is
+#                      kept in <config>.caps so a restart does not refund it.
+#
 limit chrome.exe  = 8mbit   burst 64kb
 limit steam.exe   = 20mbit  burst 256kb
-limit backup.exe  = 2mbit   burst 32kb policy drop
+limit backup.exe  = 2mbit   burst 32kb policy drop cap 20gb/month
 limit browser.exe = 8mbit   burst 64kb per-flow
 
 # --- rules ---------------------------------------------------------------
@@ -162,14 +169,23 @@ pub fn lint(loaded: &Loaded) -> String {
         s.push_str("  (none) — traffic is only counted, never shaped\n");
     }
     for l in &loaded.config.limits {
-        s.push_str(&format!(
-            "  {:<16} {:>10}  burst {:>8}  policy {:<12} scope {}\n",
+        let mut line = format!(
+            "  {:<16} {:>10}  burst {:>8}  policy {:<12} scope {}",
             l.name,
             nr_core::stats::human_bps(l.rate_bps),
             nr_core::stats::human_bytes(l.burst_bytes),
             l.policy.as_str(),
             l.scope.as_str()
-        ));
+        );
+        if let Some(cap) = l.cap {
+            line.push_str(&format!(
+                "  cap {}/{}",
+                nr_core::stats::human_bytes(cap.bytes),
+                cap.period.as_str()
+            ));
+        }
+        line.push('\n');
+        s.push_str(&line);
     }
 
     s.push_str("\nrules (first match wins)\n");
@@ -317,6 +333,10 @@ mod tests {
         assert!(
             out.contains("scope per-flow"),
             "lint must show the scope:\n{out}"
+        );
+        assert!(
+            out.contains("cap 20.00 GB/month"),
+            "lint must show the cap and its period:\n{out}"
         );
         let _ = fs::remove_dir_all(&dir);
     }

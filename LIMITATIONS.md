@@ -3,6 +3,11 @@
 This file exists because a project that claims to be "faster and lighter" owes
 the reader a list of what it has *not* proven.
 
+> **This file changed again after data caps landed.** Caps are unit-tested
+> (exhaustion, rollover, restore) and the calendar is tested against known
+> dates, but nothing here has been run for a month against a real provider's
+> meter. Treat the count as our accounting, not the carrier's.
+>
 > **This file changed again after 0.2.0.** CI had never actually run — the
 > workflow file was invalid — so "enforced in CI" below now means it is enforced
 > for real, on Linux and on a Windows runner. The first Windows run found a
@@ -38,6 +43,8 @@ What that does and does not buy you:
 | The driver accepts our re-injected packets | **untested** — needs hardware |
 | `WinDivertHelperParsePacket` agreement with our own parser | **untested** — needs hardware |
 | `dist/netrocket-0.2.0-windows-x64.zip` contains a working shaper | **not claimed** — the binary has never been started |
+| A daily/monthly cap stops traffic at the right byte | **unit-tested** in the engine; the accounting has never been compared with a carrier's meter, and it resets on UTC boundaries, not local midnight |
+| The cap counter survives a restart | **unit-tested** (`caps::tests`), including a stale file; a crash loses at most one minute of accounting, and two daemons sharing one config would overwrite each other's file |
 
 There is a compiled artifact, and its existence proves less than it looks like it
 does. `netrocket.exe` in that zip is a real PE32+ x86-64 executable that links

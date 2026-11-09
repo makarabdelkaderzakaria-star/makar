@@ -111,6 +111,65 @@ impl LimitScope {
     }
 }
 
+/// How often a data cap resets.
+///
+/// Both periods are **UTC** boundaries: midnight UTC for [`CapPeriod::Day`] and
+/// the first of the month for [`CapPeriod::Month`]. A local-time reset would
+/// need a timezone database or an OS call, and "it resets at midnight UTC" is a
+/// smaller surprise than an hour nobody can predict.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, PartialOrd, Ord, Hash)]
+#[repr(u8)]
+pub enum CapPeriod {
+    /// Resets at 00:00 UTC.
+    #[default]
+    Day = 0,
+    /// Resets on the first of the month, 00:00 UTC.
+    Month = 1,
+}
+
+impl CapPeriod {
+    /// Parse from the config file spelling.
+    #[must_use]
+    pub fn parse(s: &str) -> Option<Self> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "day" | "daily" | "d" => Some(Self::Day),
+            "month" | "monthly" | "m" => Some(Self::Month),
+            _ => None,
+        }
+    }
+
+    /// Stable spelling for config files, logs and diagnostics.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Day => "day",
+            Self::Month => "month",
+        }
+    }
+}
+
+/// A byte budget for one limit, reset every [`CapPeriod`].
+///
+/// This is the feature a metered connection actually needs: a rate limit says
+/// how fast, a cap says how much. Bytes are counted in **both** directions and
+/// charged when a packet is admitted, not when it is emitted — overcounting a
+/// packet the retention buffer later sheds is the safe direction to be wrong.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Cap {
+    /// Budget in bytes.
+    pub bytes: u64,
+    /// Reset period.
+    pub period: CapPeriod,
+}
+
+impl Cap {
+    /// Build a cap.
+    #[must_use]
+    pub const fn new(bytes: u64, period: CapPeriod) -> Self {
+        Self { bytes, period }
+    }
+}
+
 /// One named bandwidth limit.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Limits {
@@ -124,6 +183,8 @@ pub struct Limits {
     pub policy: OverLimitPolicy,
     /// Whether the bucket is shared by the process or kept per flow.
     pub scope: LimitScope,
+    /// Optional byte budget that resets every day or month.
+    pub cap: Option<Cap>,
 }
 
 impl Limits {
@@ -136,7 +197,15 @@ impl Limits {
             burst_bytes: 64 * 1024,
             policy: OverLimitPolicy::Shape,
             scope: LimitScope::Process,
+            cap: None,
         }
+    }
+
+    /// Give this limit a byte budget that resets every `period`.
+    #[must_use]
+    pub fn cap(mut self, bytes: u64, period: CapPeriod) -> Self {
+        self.cap = Some(Cap::new(bytes, period));
+        self
     }
 
     /// Give every flow its own bucket (see [`LimitScope`]).
@@ -193,6 +262,9 @@ impl Limits {
             return Err(ConfigError::BurstTooSmall {
                 burst: self.burst_bytes,
             });
+        }
+        if self.cap.is_some_and(|c| c.bytes == 0) {
+            return Err(ConfigError::ZeroCap);
         }
         Ok(())
     }
@@ -406,7 +478,7 @@ fn parse_limit(rest: &str) -> Result<Limits, ConfigError> {
         key: "limit".to_owned(),
         value: rest.to_owned(),
     })?;
-    let mut tokens = tail.split_whitespace();
+    let mut tokens = tail.split_whitespace().peekable();
     let rate_tok = tokens.next().ok_or_else(|| ConfigError::BadValue {
         key: "limit.rate".to_owned(),
         value: rest.to_owned(),
@@ -437,6 +509,40 @@ fn parse_limit(rest: &str) -> Result<Limits, ConfigError> {
                     key: "limit.policy".to_owned(),
                     value: v.to_owned(),
                 })?;
+            }
+            // `cap 50gb/day`, `cap 50gb per day`, `cap 50gb day` — the period
+            // defaults to a day, because that is what a metered connection is
+            // billed on.
+            "cap" => {
+                let raw = tokens.next().ok_or_else(|| ConfigError::BadValue {
+                    key: "limit.cap".to_owned(),
+                    value: String::new(),
+                })?;
+                let (size, mut period_word) = match raw.split_once('/') {
+                    Some((sz, p)) => (sz, Some(p.to_owned())),
+                    None => (raw, None),
+                };
+                let bytes = parse_size(size).ok_or_else(|| ConfigError::BadValue {
+                    key: "limit.cap".to_owned(),
+                    value: raw.to_owned(),
+                })?;
+                if period_word.is_none() {
+                    let connective = tokens.peek().map(|t| t.to_ascii_lowercase());
+                    if matches!(connective.as_deref(), Some("per" | "a" | "each")) {
+                        tokens.next();
+                    }
+                    if tokens.peek().is_some_and(|t| CapPeriod::parse(t).is_some()) {
+                        period_word = tokens.next().map(str::to_owned);
+                    }
+                }
+                let period = match period_word {
+                    Some(w) => CapPeriod::parse(&w).ok_or_else(|| ConfigError::BadValue {
+                        key: "limit.cap".to_owned(),
+                        value: w,
+                    })?,
+                    None => CapPeriod::default(),
+                };
+                limit.cap = Some(Cap::new(bytes, period));
             }
             // `per-flow` is a bare token; `scope flow` is the same thing spelled
             // with an argument, because both read naturally in a config file.
@@ -613,6 +719,36 @@ rule limit=chrome.exe : tcp
     fn rejects_a_bad_scope_value() {
         let err = Config::parse("limit x.exe = 1mbit scope banana\n").unwrap_err();
         assert!(matches!(err, ConfigError::BadValue { .. }), "{err:?}");
+    }
+
+    #[test]
+    fn parses_caps_in_every_spelling() {
+        let (cfg, _) = Config::parse(
+            "limit a.exe = 1mbit cap 50gb/day\n\
+             limit b.exe = 1mbit cap 2mb per month\n\
+             limit c.exe = 1mbit cap 1gb\n",
+        )
+        .unwrap();
+        let a = cfg.limit("a.exe").unwrap().cap.unwrap();
+        assert_eq!(a.bytes, 50_000_000_000);
+        assert_eq!(a.period, CapPeriod::Day);
+        let b = cfg.limit("b.exe").unwrap().cap.unwrap();
+        assert_eq!(b.bytes, 2_000_000);
+        assert_eq!(b.period, CapPeriod::Month);
+        // No period given: a day, because that is what is billed.
+        let c = cfg.limit("c.exe").unwrap().cap.unwrap();
+        assert_eq!(c.bytes, 1_000_000_000);
+        assert_eq!(c.period, CapPeriod::Day);
+    }
+
+    #[test]
+    fn rejects_a_zero_or_malformed_cap() {
+        // Zero bytes would drop everything forever.
+        assert!(Config::parse("limit a.exe = 1mbit cap 0/day\n").is_err());
+        // A period nobody implements must not silently become "day".
+        assert!(Config::parse("limit a.exe = 1mbit cap 5gb/week\n").is_err());
+        // A cap with no value at all is a typo, not a default.
+        assert!(Config::parse("limit a.exe = 1mbit cap\n").is_err());
     }
 
     #[test]

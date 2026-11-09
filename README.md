@@ -78,6 +78,7 @@ limit chrome.exe  = 8mbit  burst 64kb
 limit steam.exe   = 20mbit burst 256kb
 limit backup.exe  = 2mbit  burst 32kb policy drop
 limit browser.exe = 8mbit  burst 64kb per-flow
+limit phone.exe   = 4mbit  burst 64kb cap 20gb/month
 
 rule limit=chrome.exe  : proc chrome.exe
 rule limit=steam.exe   : proc steam.exe
@@ -86,7 +87,9 @@ rule limit=browser.exe : proc browser.exe
 ```
 
 `per-flow` gives each connection its own bucket; without it a limit is one
-bucket shared by every flow the process opens.
+bucket shared by every flow the process opens. `cap` is a byte budget that
+resets at 00:00 UTC daily or monthly — the metered-connection case — and its
+counter survives a restart.
 
 Full reference: [`docs/CONFIG.md`](docs/CONFIG.md).
 

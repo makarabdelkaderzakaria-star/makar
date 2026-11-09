@@ -34,13 +34,14 @@ Durations accept `ms`, `s`, or a bare number of milliseconds. Sizes accept
 packets is a shaper that causes retransmissions, and a retransmission spends the
 bandwidth twice. `250ms` is below the smallest plausible TCP RTO.
 
-## `limit <name> = <rate> [burst <bytes>] [policy <p>] [per-flow]`
+## `limit <name> = <rate> [burst <bytes>] [policy <p>] [per-flow] [cap <bytes>/<period>]`
 
 ```text
 limit chrome.exe  = 8mbit   burst 64kb
 limit steam.exe   = 20mbit  burst 256kb
 limit backup.exe  = 2mbit   burst 32kb policy drop
 limit browser.exe = 8mbit   burst 64kb per-flow
+limit phone.exe   = 4mbit   burst 64kb cap 20gb/month
 ```
 
 * Rates: `8mbit`, `20mbps`, `512kbit`, `1.5mbit`, or a bare byte/s number.
@@ -60,6 +61,38 @@ limit browser.exe = 8mbit   burst 64kb per-flow
   The cost is one `u64` in the flow table row that already exists — no second
   table, no allocation. `scope process` is the default and is what every
   previous version did.
+
+### Data caps: `cap <bytes>/<period>`
+
+A rate limit says *how fast*; a cap says *how much*. This is the feature a
+metered connection needs — tethering from a phone plan, or a hotel Wi-Fi with a
+daily allowance.
+
+```text
+limit phone.exe = 4mbit burst 64kb cap 20gb/month
+limit guest.exe = 8mbit burst 64kb cap 2gb/day
+```
+
+* Periods are `day` (resets at **00:00 UTC**) and `month` (resets on the first
+  of the month, 00:00 UTC). UTC is deliberate: local time would need a timezone
+  database, and "it resets at midnight UTC" is a smaller surprise than an hour
+  nobody can predict.
+* The period may be written `cap 20gb/month`, `cap 20gb per month`, or
+  `cap 20gb month`. Without a period it is a day.
+* Bytes are counted in **both directions** and charged when a packet is
+  admitted, not when it is emitted: a packet the retention buffer later sheds
+  still counts. Overcounting is the safe direction to be wrong in.
+* When the budget is spent, matching packets are dropped with reason `cap`
+  until the period rolls over: `netrocket simulate` lists the count under
+  `cap`, the daemon's status line and `netrocket tui` include it in the drop
+  breakdown, and `netrocket lint` prints the cap and its period.
+* The counter is persisted in `<config file>.caps` (for
+  `netrocket.conf`, that is `netrocket.conf.caps`) so restarting the daemon does
+  not refund a budget that was already spent. The file stores the period stamp
+  with the count, so a counter from yesterday cannot be charged to today. A
+  crash loses at most the last minute of accounting.
+* A cap of `0` is rejected at parse time: it would drop everything forever.
+  Remove the `cap` token to disable it.
 
 ## `rule <action> : <match>`
 
@@ -118,6 +151,7 @@ limit chrome.exe = 8mbit  burst 64kb
 limit steam.exe  = 20mbit burst 256kb
 limit backup.exe = 2mbit  burst 32kb policy drop
 limit browser.exe = 8mbit burst 64kb per-flow
+limit phone.exe   = 4mbit burst 64kb cap 20gb/month
 
 rule allow          : proc svchost.exe
 rule limit=chrome.exe : proc chrome.exe

@@ -65,6 +65,9 @@ pub fn simulate(loaded: &crate::configio::Loaded, args: &SimArgs) -> Result<SimO
     // show what the real engine will do, so it must not approximate them.
     let mut engine = Engine::<8192>::new(config);
     engine.set_rules(loaded.rules.clone());
+    // Caps reset on UTC boundaries; the simulator uses the real clock so a
+    // simulated day is the same day the daemon would be in.
+    engine.set_calendar(crate::caps::utc_now());
 
     // Seed attribution the way the Windows runner does at start-up: from an
     // endpoint table that predates the engine. In the simulator we synthesise
@@ -244,6 +247,7 @@ pub fn simulate(loaded: &crate::configio::Loaded, args: &SimArgs) -> Result<SimO
         ("too-late", snapshot.dropped_late),
         ("budget", snapshot.dropped_budget),
         ("quota", snapshot.dropped_quota),
+        ("cap", snapshot.dropped_cap),
     ];
     let limited = snapshot.rate_over > 0;
     let _ = rates.last();
@@ -447,6 +451,19 @@ pub fn run(loaded: crate::configio::Loaded, args: &RunArgs) -> Result<(), String
     let mut engine = Engine::<8192>::new(config.clone());
     engine.set_rules(loaded.rules);
 
+    // Data caps: the counters live next to the configuration file, so a restart
+    // does not hand back a budget that was already spent today.
+    let caps_path = crate::caps::path_for(&args.config);
+    engine.set_calendar(crate::caps::utc_now());
+    let restored = crate::caps::load_into(&mut engine, &caps_path);
+    if restored > 0 {
+        eprintln!(
+            "restored {restored} cap counter(s) from {}",
+            caps_path.display()
+        );
+    }
+    let mut last_cap_save = 0u64;
+
     // 1. Attribution first: a FLOW handle only sees flows created after it
     //    exists, so opening it before the network handle keeps the blind spot
     //    as small as the OS allows. Anything that slips through stays
@@ -636,6 +653,16 @@ pub fn run(loaded: crate::configio::Loaded, args: &RunArgs) -> Result<(), String
 
         if now_ms.saturating_sub(last_tick) >= 1_000 {
             engine.tick(now_ms);
+            // Cap periods and counters. The calendar is re-read every second
+            // because a laptop resumes from suspend (or its clock is corrected
+            // by NTP) and midnight UTC can pass without the loop noticing.
+            engine.set_calendar(crate::caps::utc_now());
+            if now_ms.saturating_sub(last_cap_save) >= 60_000 {
+                last_cap_save = now_ms;
+                if let Err(e) = crate::caps::save(&engine, &caps_path) {
+                    eprintln!("warning: could not save cap counters: {e}");
+                }
+            }
             if let Ok(mut table) = attribution.lock() {
                 table.sweep(now_ms);
             }
@@ -676,6 +703,12 @@ pub fn run(loaded: crate::configio::Loaded, args: &RunArgs) -> Result<(), String
         .recv_handle()
         .shutdown(nr_divert::win::ShutdownMode::Both);
     let _ = flow_thread.join();
+
+    // Last accounting before exit: the counters are the only thing a cap
+    // promises across a restart, so they are written on the way out too.
+    if let Err(e) = crate::caps::save(&engine, &caps_path) {
+        eprintln!("warning: could not save cap counters: {e}");
+    }
 
     if send_failures > 0 {
         eprintln!(

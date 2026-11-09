@@ -3,6 +3,7 @@
 //! Exit codes are documented in `cli::help_text()` and are stable:
 //! `0` success, `1` usage, `2` configuration, `3` runtime.
 
+mod caps;
 mod cli;
 mod configio;
 mod doctor;

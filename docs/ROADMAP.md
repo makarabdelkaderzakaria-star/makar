@@ -87,8 +87,12 @@ Still open:
       single-flow enforcement, and for emission charging only the flow that
       emitted.
 * [ ] Time-of-day schedules and temporary boosts ("full speed until I am done").
-* [ ] Data caps: a byte budget per day/month, which is what metered connections
-      need far more than a rate limit.
+* [x] Data caps: a byte budget per day/month, which is what metered connections
+      need far more than a rate limit. `limit <name> = <rate> cap 20gb/month`
+      (or `/day`), UTC rollover, counters persisted in `<config>.caps`, drop
+      reason `cap`. Tests: budget exhaustion, daily rollover, a monthly cap
+      surviving the next day, restoring a counter only within its own period,
+      and an uncapped limit never counting a cap drop.
 * [ ] CoDel-style queue management for the "no limit configured but the link is
       congested" case — complementary to GCRA, not a replacement.
 * [ ] ECN marking instead of dropping, where the peer supports it.
