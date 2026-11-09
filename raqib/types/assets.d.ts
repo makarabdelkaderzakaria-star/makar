@@ -6,6 +6,16 @@ declare module 'virtual:fonts' {
   export const fonts: Record<string, string>;
 }
 
+declare module 'virtual:worker' {
+  /**
+   * The source of the search worker, inlined into the bundle.
+   *
+   * A single-file executable has no file beside it, so the worker is written
+   * out to a temporary file the first time it is needed.
+   */
+  export const workerSource: string;
+}
+
 declare module '*.html' {
   const content: string;
   export default content;

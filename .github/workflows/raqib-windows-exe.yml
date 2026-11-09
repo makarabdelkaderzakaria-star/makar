@@ -1,0 +1,183 @@
+name: raqib-windows-exe
+
+# Build the standalone Windows executable and test the executable itself on a
+# real Windows machine, with Node.js taken off the machine first.
+
+on:
+  push:
+    branches:
+      - arena/3b346fad-makar
+    paths:
+      - 'raqib/**'
+      - '.github/workflows/raqib-windows-exe.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows-exe:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    env:
+      RAQIB_TAG: raqib-0.2.0-windows
+      RAQIB_VERSION: 0.2.0
+      GH_TOKEN: ${{ github.token }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: install the development dependencies
+        run: npm ci --prefix raqib
+
+      - name: build the script and the executable
+        shell: pwsh
+        run: |
+          Set-Location raqib
+          node scripts/build.mjs
+          # The base runtime is the very node that is running this step, so the
+          # executable carries the same JavaScript engine as the machine it
+          # was built on.
+          node scripts/build-sea.mjs --node (node -p "process.execPath")
+
+      - name: build the fixtures the tests run against
+        shell: pwsh
+        run: node raqib/scripts/make-fixtures.mjs "$env:RUNNER_TEMP\fixtures"
+
+      - name: fetch a real Brave for Windows
+        shell: pwsh
+        run: |
+          $version = '1.101.38'
+          $url = "https://github.com/brave/brave-browser/releases/download/v$version/brave-v$version-win32-x64.zip"
+          Write-Host "downloading $url"
+          Invoke-WebRequest -Uri $url -OutFile "$env:RUNNER_TEMP\brave.zip"
+          Expand-Archive -Path "$env:RUNNER_TEMP\brave.zip" -DestinationPath "$env:RUNNER_TEMP\brave" -Force
+          $exe = Get-ChildItem -Path "$env:RUNNER_TEMP\brave" -Recurse -Filter 'brave.exe' | Select-Object -First 1
+          if (-not $exe) { throw 'no brave.exe in the archive' }
+          $exe.FullName | Set-Content -Path "$env:RUNNER_TEMP\brave-exe.txt"
+          Write-Host "brave.exe: $($exe.FullName) ($($exe.Length) bytes)"
+
+      - name: copy the executable into a clean folder
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path "$env:RUNNER_TEMP\clean" -Force | Out-Null
+          Copy-Item -LiteralPath 'raqib\dist\Raqib.exe' -Destination "$env:RUNNER_TEMP\clean\Raqib.exe" -Force
+          Get-ChildItem -LiteralPath "$env:RUNNER_TEMP\clean" | Format-Table Name, Length
+
+      - name: take Node.js off the machine
+        shell: pwsh
+        run: |
+          # Everything that could be mistaken for a runtime is renamed out of
+          # the way, so the executable has to stand on its own.
+          $moved = @()
+          foreach ($candidate in @("$env:ProgramFiles\nodejs", "$env:LOCALAPPDATA\Programs\nodejs")) {
+            if (Test-Path -LiteralPath $candidate) {
+              Rename-Item -LiteralPath $candidate -NewName ((Split-Path -Leaf $candidate) + '.removed')
+              $moved += $candidate
+            }
+          }
+          $toolCache = Join-Path $env:RUNNER_TOOL_CACHE 'node'
+          if (Test-Path -LiteralPath $toolCache) {
+            Get-ChildItem -LiteralPath $toolCache -Directory | ForEach-Object {
+              Rename-Item -LiteralPath $_.FullName -NewName ($_.Name + '.removed')
+              $moved += $_.FullName
+            }
+          }
+          $moved | Set-Content -Path "$env:RUNNER_TEMP\moved-node.txt"
+          Write-Host "moved out of the way: $($moved -join ', ')"
+          $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot;$env:SystemRoot\System32\Wbem"
+          if (Get-Command node -ErrorAction SilentlyContinue) { throw 'node is still reachable' }
+          Write-Host 'node is gone'
+
+      - name: test the executable
+        shell: pwsh
+        run: |
+          $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot;$env:SystemRoot\System32\Wbem"
+          $braveDir = ''
+          $braveExe = "$env:RUNNER_TEMP\brave-exe.txt"
+          if (Test-Path -LiteralPath $braveExe) {
+            $braveExePath = (Get-Content -LiteralPath $braveExe -Raw).Trim()
+            if ($braveExePath) { $braveDir = Split-Path -Parent (Split-Path -Parent $braveExePath) }
+          }
+          & raqib\scripts\test-windows-exe.ps1 `
+            -Exe "$env:RUNNER_TEMP\clean\Raqib.exe" `
+            -Fixtures "$env:RUNNER_TEMP\fixtures" `
+            -BraveDir $braveDir `
+            -ResultsPath "$env:RUNNER_TEMP\results.json"
+          if (Test-Path -LiteralPath "$env:RUNNER_TEMP\results.json") {
+            Get-Content -LiteralPath "$env:RUNNER_TEMP\results.json" -Raw |
+              Out-File -FilePath "$env:GITHUB_STEP_SUMMARY" -Encoding utf8
+          }
+
+      - name: put Node.js back
+        if: always()
+        shell: pwsh
+        run: |
+          $movedFile = "$env:RUNNER_TEMP\moved-node.txt"
+          if (Test-Path -LiteralPath $movedFile) {
+            Get-Content -LiteralPath $movedFile | ForEach-Object {
+              if ($_ -and (Test-Path -LiteralPath "$_.removed")) {
+                Rename-Item -LiteralPath "$_.removed" -NewName (Split-Path -Leaf $_)
+              }
+            }
+          }
+          Write-Host 'node restored'
+
+      - name: publish the executable and the results
+        if: always()
+        shell: pwsh
+        run: |
+          $sha = (Get-FileHash -LiteralPath 'raqib\dist\Raqib.exe' -Algorithm SHA256).Hash.ToLower()
+          Set-Content -Path 'raqib\dist\SHA256' -Value $sha -Encoding ascii
+          Set-Content -Path 'raqib\dist\SHA256SUMS' -Value "$sha  Raqib.exe" -Encoding ascii
+
+          # A draft release: the bytes come out of the workflow and can be
+          # fetched, but nothing is published to the world.
+          $existing = gh api "repos/$env:GITHUB_REPOSITORY/releases" --paginate 2>$null |
+            ConvertFrom-Json | Where-Object { $_.tag_name -eq $env:RAQIB_TAG }
+          if ($existing) {
+            $release = $existing | Select-Object -First 1
+            Write-Host "reusing release $($release.id)"
+          } else {
+            $release = gh api "repos/$env:GITHUB_REPOSITORY/releases" --method POST `
+              -f tag_name=$env:RAQIB_TAG `
+              -f name="Raqib $env:RAQIB_VERSION for Windows" `
+              -f body="Standalone Windows executable. Draft." `
+              -F draft=true -F prerelease=false | ConvertFrom-Json
+            Write-Host "created release $($release.id)"
+          }
+          $upload = $release.upload_url -replace '{\?name,label}', ''
+
+          function Upload-Asset {
+            param([string]$Path, [string]$Name)
+            $url = "$upload`?name=$Name&label=$Name"
+            gh api $url --method POST --input $Path -H 'Content-Type: application/octet-stream' | Out-Null
+            Write-Host "uploaded $Name"
+          }
+          Upload-Asset -Path 'raqib\dist\Raqib.exe' -Name 'Raqib.exe'
+          Upload-Asset -Path 'raqib\dist\SHA256' -Name 'SHA256'
+          Upload-Asset -Path 'raqib\dist\SHA256SUMS' -Name 'SHA256SUMS'
+          if (Test-Path -LiteralPath "$env:RUNNER_TEMP\results.json") {
+            Copy-Item -LiteralPath "$env:RUNNER_TEMP\results.json" -Destination 'raqib\dist\results.json' -Force
+            Upload-Asset -Path 'raqib\dist\results.json' -Name 'results.json'
+          }
+          Write-Host "published sha256: $sha"
+
+      - name: keep the results in the repository
+        if: always()
+        shell: pwsh
+        run: |
+          if (Test-Path -LiteralPath 'raqib\dist\results.json') {
+            New-Item -ItemType Directory -Path 'raqib\ci-results' -Force | Out-Null
+            Copy-Item -LiteralPath 'raqib\dist\results.json' -Destination 'raqib\ci-results\results.json' -Force
+            Copy-Item -LiteralPath 'raqib\dist\SHA256' -Destination 'raqib\ci-results\SHA256' -Force
+            git config user.email 'ci@raqib.local'
+            git config user.name 'raqib ci'
+            git add raqib/ci-results
+            git commit -m "ci: the result of testing the Windows executable" --allow-empty
+            git push origin HEAD:raqib-ci-results --force
+          }

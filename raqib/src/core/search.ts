@@ -9,9 +9,9 @@
  */
 import { readFile } from 'node:fs/promises';
 import { Worker } from 'node:worker_threads';
-import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 import { walk, looksBinary, isTextPath, workerCount } from './util.js';
+import { resolveWorkerScript } from './runtime.js';
 
 export interface SearchOptions {
   pattern: string;
@@ -157,7 +157,7 @@ export async function searchTree(root: string, options: SearchOptions): Promise<
     return true;
   });
 
-  const workerFile = join(dirname(fileURLToPath(import.meta.url)), 'searchWorker.mjs');
+  const workerFile = resolveWorkerScript();
   const workerCountWanted = Math.min(workerCount(), Math.max(1, Math.ceil(candidates.length / 400)));
   const matches: SearchHit[] = [];
   let filesScanned = 0;
@@ -228,7 +228,10 @@ export async function searchTree(root: string, options: SearchOptions): Promise<
     filesScanned,
     filesWithMatches,
     elapsedMs: performance.now() - started,
-    workers: usedWorkers || 1,
+    // The honest number: zero means the search ran on the main thread, and
+    // anything else is the count of worker threads that carried it. Reporting
+    // "1" for the inline path would claim a worker that never started.
+    workers: usedWorkers,
   };
 }
 
@@ -243,7 +246,7 @@ function runInWorker(files: Array<{ path: string; rel: string }>, options: Searc
   return new Promise((resolve, reject) => {
     let worker: Worker;
     try {
-      worker = new Worker(join(dirname(fileURLToPath(import.meta.url)), 'searchWorker.mjs'));
+      worker = new Worker(resolveWorkerScript());
     } catch (error) {
       reject(error);
       return;

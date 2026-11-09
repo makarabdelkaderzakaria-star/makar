@@ -281,7 +281,8 @@ async function searchCommand(flags: Flags): Promise<number> {
     contextLines: flags.context,
   });
   const human = [
-    `${result.matches.length} match(es) in ${result.filesWithMatches} file(s) — ${result.filesScanned} scanned in ${formatDuration(result.elapsedMs)} using ${result.workers} worker(s)`,
+    `${result.matches.length} match(es) in ${result.filesWithMatches} file(s) — ${result.filesScanned} scanned in ${formatDuration(result.elapsedMs)} using ` +
+    `${result.workers > 0 ? `${result.workers} worker thread(s)` : 'the main thread only'}`,
     '',
     ...result.matches.map((m) => `${m.file}:${m.line}:${m.column}  ${m.text}`),
   ].join('\n');

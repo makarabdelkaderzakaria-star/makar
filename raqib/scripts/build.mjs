@@ -5,71 +5,18 @@
  *  - dist/raqib.mjs        the single-file CLI / MCP server / web console host
  *  - dist/test/*.test.mjs  the compiled test files (node --test)
  *
- * The UI is inlined as text and the three web fonts are inlined as base64, so
- * the shipped artifact never reaches the network for an asset.
+ * The UI is inlined as text and the three web fonts are inlined as base64,
+ * so the shipped artifact never reaches the network for an asset.
  */
 import { build } from 'esbuild';
-import { readFileSync, existsSync, mkdirSync, readdirSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { mkdirSync, existsSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
+import { commonOptions, root } from './esbuild-plugins.mjs';
 
-const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const wantTests = process.argv.includes('--tests');
 const watch = process.argv.includes('--watch');
 
-const FONT_FILES = [
-  ['bricolage', '@fontsource/bricolage-grotesque/files/bricolage-grotesque-latin-400-normal.woff2'],
-  ['plexSans', '@fontsource/ibm-plex-sans/files/ibm-plex-sans-latin-400-normal.woff2'],
-  ['plexSansMedium', '@fontsource/ibm-plex-sans/files/ibm-plex-sans-latin-500-normal.woff2'],
-  ['plexMono', '@fontsource/ibm-plex-mono/files/ibm-plex-mono-latin-400-normal.woff2'],
-  ['plexMonoMedium', '@fontsource/ibm-plex-mono/files/ibm-plex-mono-latin-500-normal.woff2'],
-];
-
-function fontData() {
-  const out = {};
-  for (const [key, rel] of FONT_FILES) {
-    const file = join(root, 'node_modules', rel);
-    if (!existsSync(file)) {
-      throw new Error(`missing font asset: ${rel} (run: npm install)`);
-    }
-    out[key] = readFileSync(file).toString('base64');
-  }
-  return out;
-}
-
-/** Inline local assets (html/css/js) and the base64 font payload. */
-const inlineAssets = {
-  name: 'raqib-inline-assets',
-  setup(pluginBuild) {
-    pluginBuild.onResolve({ filter: /^\.\/ui\// }, (args) => ({
-      path: resolve(args.resolveDir, args.path),
-      namespace: 'raqib-ui',
-    }));
-    pluginBuild.onLoad({ filter: /.*/, namespace: 'raqib-ui' }, (args) => ({
-      contents: readFileSync(args.path, 'utf8'),
-      loader: 'text',
-    }));
-
-    pluginBuild.onResolve({ filter: /^virtual:fonts$/ }, () => ({
-      path: 'fonts',
-      namespace: 'raqib-fonts',
-    }));
-    pluginBuild.onLoad({ filter: /.*/, namespace: 'raqib-fonts' }, () => ({
-      contents: `export const fonts = ${JSON.stringify(fontData())};`,
-      loader: 'js',
-    }));
-  },
-};
-
-const common = {
-  bundle: true,
-  platform: 'node',
-  target: 'node20',
-  format: 'esm',
-  logLevel: 'warning',
-  legalComments: 'none',
-  plugins: [inlineAssets],
-};
+const common = commonOptions({ format: 'esm', runtime: 'node' });
 
 const targets = [
   {
@@ -114,7 +61,12 @@ if (watch) {
   }
   console.log('raqib: watching');
 } else {
-  await Promise.all(targets.map((target) => build(target)));
+  // The worker is built first: the CLI embeds its source, so the CLI cannot
+  // be built until the worker exists.
+  const workerTarget = targets.find((t) => t.outfile.endsWith('searchWorker.mjs'));
+  const rest = targets.filter((t) => t !== workerTarget);
+  if (workerTarget) await build(workerTarget);
+  await Promise.all(rest.map((target) => build(target)));
   const { statSync } = await import('node:fs');
   const size = statSync(join(root, 'dist/raqib.mjs')).size;
   console.log(`raqib: built dist/raqib.mjs (${(size / 1024).toFixed(1)} KiB)`);
