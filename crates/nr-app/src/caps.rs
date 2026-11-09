@@ -8,7 +8,7 @@
 //! ```text
 //! # netrocket caps v1
 //! # name<TAB>used-bytes<TAB>period-stamp
-//! backup.exe	1834214400	20766
+//! backup.exe<TAB>1834214400<TAB>20766
 //! ```
 //!
 //! The period stamp (`Calendar` day or month index) is stored with the count so
