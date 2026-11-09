@@ -101,8 +101,8 @@ analysis 54 ms, index 152 ms, search 190 ms, JS application analysis 70 ms.
 
 | | |
 |---|---|
-| Release bundle (linux x64) | https://drive.google.com/file/d/1tJ2HRimbSw5EaXFDIPG0b7SS9x9rEUCJ/view |
-| Full source | https://drive.google.com/file/d/1fP6O91wP-_lvqrel5la7mBAn70TCqRcB/view |
+| Release bundle (linux x64) | https://drive.google.com/file/d/1-6EnYwpkMqIpaY-OuzSALdYS_sVZuMLx/view |
+| Full source | https://drive.google.com/file/d/1snxoNKbyHL7OX3TLmisYRZCbDSQdp-fo/view |
 | Folder | https://drive.google.com/drive/folders/1TijuzghilDd7xOTY0Zw_rOphb_Lo_BE_ |
 
 Both files are readable by anyone with the link.
@@ -115,15 +115,19 @@ node raqib.mjs --help
 ```
 
 The release bundle is self-contained: `raqib.mjs`, the search worker, the
-documentation, `BUILD-INFO.txt` and `SHA256SUMS`. Nothing to install.
+documentation, `TRY-IT.md` (a bilingual quick start), `BUILD-INFO.txt` and
+`SHA256SUMS`. Nothing to install.
+
+Both published files were downloaded back from Drive and verified: the
+checksums match and the downloaded copy runs.
 
 ---
 
 ## SHA-256
 
 ```
-ebda89b53da5b3d17035dd4970ab5e181af9a8af6e9e3ab05be0a62325c89d14  raqib-0.2.0-linux-x64.tar.gz
-4d9aa178b973ad16355b4fadbdd660b599b60c630899857374cd487247bdc325  raqib-0.2.0-source.tar.gz
+049da875b07ee294e4c2a546310691f2913c6338b0feb3c81726cc36b3294649  raqib-0.2.0-linux-x64.tar.gz
+d1550de9d08e399cb7379c6292691e0a6adcca3faf688c5c7834c168b6a9d063  raqib-0.2.0-source.tar.gz
 ```
 
 63 tests pass; `tsc --noEmit` is clean.

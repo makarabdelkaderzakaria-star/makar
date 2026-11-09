@@ -38,6 +38,8 @@ mkdirSync(join(stage, 'docs'), { recursive: true });
 for (const file of ['README.md', 'LICENSE', 'NOTICE', 'LIMITATIONS.md', 'CHANGELOG.md']) {
   cpSync(join(root, file), join(stage, file));
 }
+// The quick-start, in Arabic and English, for whoever opens the archive first.
+cpSync(join(root, 'TRY-IT.md'), join(stage, 'TRY-IT.md'));
 for (const file of ['ARCHITECTURE.md', 'MCP.md', 'COMPARISON.md', 'DESIGN.md', 'ROADMAP.md']) {
   cpSync(join(root, 'docs', file), join(stage, 'docs', file));
 }
@@ -61,7 +63,7 @@ Checksums for this bundle are in SHA256SUMS. Verify them with:
 writeFileSync(join(stage, 'BUILD-INFO.txt'), buildInfo, 'utf8');
 
 // 4. checksums
-const files = ['raqib.mjs', 'searchWorker.mjs', 'README.md', 'LICENSE', 'NOTICE', 'LIMITATIONS.md', 'CHANGELOG.md', 'BUILD-INFO.txt'];
+const files = ['raqib.mjs', 'searchWorker.mjs', 'README.md', 'TRY-IT.md', 'LICENSE', 'NOTICE', 'LIMITATIONS.md', 'CHANGELOG.md', 'BUILD-INFO.txt'];
 const sums = files
   .map((file) => {
     const digest = createHash('sha256').update(readFileSync(join(stage, file))).digest('hex');
