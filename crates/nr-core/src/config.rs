@@ -170,6 +170,93 @@ impl Cap {
     }
 }
 
+/// A time-of-day window, in minutes since 00:00 UTC.
+///
+/// `start < end` is a window inside one day (`08:00-18:00`); `start > end`
+/// wraps midnight (`22:00-06:00`), which is what "backups overnight" looks
+/// like. The endpoints are **UTC** for the same reason caps are: local time
+/// needs a timezone database or an OS call on the hot path.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Window {
+    /// First minute the window is active, inclusive.
+    pub start_min: u16,
+    /// Minute it stops being active, exclusive.
+    pub end_min: u16,
+}
+
+impl Window {
+    /// Build a window, if the endpoints describe a non-empty one.
+    ///
+    /// `start == end` is rejected: it is a zero-length window, which is either a
+    /// typo or a request to disable the limit, and a config file should say
+    /// which. Use two windows or remove the limit.
+    #[must_use]
+    pub const fn new(start_min: u16, end_min: u16) -> Option<Self> {
+        if start_min == end_min || start_min >= MINUTES_PER_DAY || end_min >= MINUTES_PER_DAY {
+            return None;
+        }
+        Some(Self { start_min, end_min })
+    }
+
+    /// Parse `08:00-18:00`, `8-18`, or `22:30-06:15`.
+    #[must_use]
+    pub fn parse(s: &str) -> Option<Self> {
+        let (a, b) = s.split_once('-')?;
+        Self::new(parse_minute_of_day(a)?, parse_minute_of_day(b)?)
+    }
+
+    /// Does `minute` (0..1440) fall inside the window?
+    #[must_use]
+    pub const fn contains(self, minute: u16) -> bool {
+        if self.start_min < self.end_min {
+            minute >= self.start_min && minute < self.end_min
+        } else {
+            minute >= self.start_min || minute < self.end_min
+        }
+    }
+
+    /// Does the window wrap midnight?
+    #[must_use]
+    pub const fn wraps(self) -> bool {
+        self.start_min > self.end_min
+    }
+}
+
+impl std::fmt::Display for Window {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{:02}:{:02}-{:02}:{:02}",
+            self.start_min / 60,
+            self.start_min % 60,
+            self.end_min / 60,
+            self.end_min % 60
+        )
+    }
+}
+
+/// Minutes in a day.
+pub const MINUTES_PER_DAY: u16 = 24 * 60;
+
+/// `08`, `8`, `08:30` -> minutes since midnight (UTC).
+///
+/// Public because `simulate --at` needs the same spelling as a schedule, and
+/// two parsers for one time of day is how they drift apart.
+#[must_use]
+pub fn parse_minute_of_day(s: &str) -> Option<u16> {
+    let s = s.trim();
+    let (h, m) = match s.split_once(':') {
+        Some((h, m)) => (h, m),
+        None => (s, "0"),
+    };
+    let h: u16 = h.parse().ok()?;
+    let m: u16 = m.parse().ok()?;
+    if h >= 24 || m >= 60 {
+        return None;
+    }
+    Some(h * 60 + m)
+}
+
 /// One named bandwidth limit.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Limits {
@@ -185,6 +272,8 @@ pub struct Limits {
     pub scope: LimitScope,
     /// Optional byte budget that resets every day or month.
     pub cap: Option<Cap>,
+    /// Optional time-of-day window in which this limit is enforced at all.
+    pub window: Option<Window>,
 }
 
 impl Limits {
@@ -198,7 +287,15 @@ impl Limits {
             policy: OverLimitPolicy::Shape,
             scope: LimitScope::Process,
             cap: None,
+            window: None,
         }
+    }
+
+    /// Enforce this limit only inside `window` (UTC minutes).
+    #[must_use]
+    pub fn window(mut self, window: Window) -> Self {
+        self.window = Some(window);
+        self
     }
 
     /// Give this limit a byte budget that resets every `period`.
@@ -544,6 +641,18 @@ fn parse_limit(rest: &str) -> Result<Limits, ConfigError> {
                 };
                 limit.cap = Some(Cap::new(bytes, period));
             }
+            // `schedule 08:00-18:00` (a limit that only bites during work
+            // hours) and `schedule 22:00-06:00` (overnight, wrapping midnight).
+            "schedule" | "window" => {
+                let v = tokens.next().ok_or_else(|| ConfigError::BadValue {
+                    key: "limit.schedule".to_owned(),
+                    value: String::new(),
+                })?;
+                limit.window = Some(Window::parse(v).ok_or_else(|| ConfigError::BadValue {
+                    key: "limit.schedule".to_owned(),
+                    value: v.to_owned(),
+                })?);
+            }
             // `per-flow` is a bare token; `scope flow` is the same thing spelled
             // with an argument, because both read naturally in a config file.
             "per-flow" | "perflow" => limit.scope = LimitScope::Flow,
@@ -739,6 +848,46 @@ rule limit=chrome.exe : tcp
         let c = cfg.limit("c.exe").unwrap().cap.unwrap();
         assert_eq!(c.bytes, 1_000_000_000);
         assert_eq!(c.period, CapPeriod::Day);
+    }
+
+    #[test]
+    fn parses_schedules_and_rejects_empty_ones() {
+        let (cfg, _) = Config::parse("limit a.exe = 1mbit schedule 08:00-18:00\n").unwrap();
+        let w = cfg.limit("a.exe").unwrap().window.unwrap();
+        assert_eq!((w.start_min, w.end_min), (8 * 60, 18 * 60));
+
+        // Bare hours are accepted, and a window may cross midnight.
+        let (cfg, _) = Config::parse("limit b.exe = 1mbit schedule 22-6\n").unwrap();
+        let w = cfg.limit("b.exe").unwrap().window.unwrap();
+        assert!(w.wraps());
+        assert_eq!(w.to_string(), "22:00-06:00");
+
+        // A zero-length window and an impossible clock are typos, not defaults.
+        let bad = [
+            "limit c.exe = 1mbit schedule 09:00-09:00\n",
+            "limit c.exe = 1mbit schedule 25:00-26:00\n",
+            "limit c.exe = 1mbit schedule nonsense\n",
+        ];
+        for text in bad {
+            assert!(Config::parse(text).is_err(), "accepted {text:?}");
+        }
+    }
+
+    #[test]
+    fn window_membership_handles_both_sides_of_midnight() {
+        let day = Window::parse("08:00-18:00").unwrap();
+        assert!(day.contains(8 * 60));
+        assert!(day.contains(18 * 60 - 1));
+        assert!(!day.contains(18 * 60), "the end is exclusive");
+        assert!(!day.contains(7 * 60 + 59));
+
+        let night = Window::parse("22:00-06:00").unwrap();
+        assert!(night.contains(22 * 60));
+        assert!(night.contains(23 * 60 + 30));
+        assert!(night.contains(0));
+        assert!(night.contains(5 * 60 + 59));
+        assert!(!night.contains(6 * 60));
+        assert!(!night.contains(12 * 60));
     }
 
     #[test]

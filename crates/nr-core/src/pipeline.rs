@@ -21,7 +21,7 @@
 //! plausible TCP RTO. So nothing we retain is ever retransmitted on our account.
 
 use crate::calendar::Calendar;
-use crate::config::{CapPeriod, Config, LimitScope, Limits, OverLimitPolicy};
+use crate::config::{CapPeriod, Config, LimitScope, Limits, OverLimitPolicy, Window};
 use crate::flow::{FlowKey, FlowTable};
 use crate::gcra::Gcra;
 use crate::identity::{IdentityCache, Lookup, ProcKey, Resolver};
@@ -132,6 +132,7 @@ pub struct Engine<const FLOWS: usize = 8192> {
     policy: Vec<OverLimitPolicy>,
     scope: Vec<LimitScope>,
     caps: Vec<CapState>,
+    windows: Vec<Option<Window>>,
     calendar: Calendar,
     name_ids: Vec<u32>,
     scheduler: Scheduler<u64>,
@@ -154,6 +155,7 @@ impl<const FLOWS: usize> Engine<FLOWS> {
             policy: Vec::new(),
             scope: Vec::new(),
             caps: Vec::new(),
+            windows: Vec::new(),
             calendar: Calendar::default(),
             name_ids: Vec::new(),
             scheduler,
@@ -193,6 +195,7 @@ impl<const FLOWS: usize> Engine<FLOWS> {
         self.policy = policy;
         self.scope = scope;
         self.caps = caps;
+        self.windows = self.config.limits.iter().map(|l| l.window).collect();
         // Per-flow state lives in the flow rows; a reload changes the *rate*
         // those rows are interpreted with, so their timestamps must be dropped
         // (attribution itself stays, so nothing re-walks the rule table).
@@ -513,6 +516,17 @@ impl<const FLOWS: usize> Engine<FLOWS> {
             .unwrap_or(OverLimitPolicy::Shape);
         let len = pkt.accounted_len();
 
+        // Outside its window a scheduled limit is simply not a limit: nothing is
+        // charged (not even the cap) and the packet goes out at once.
+        if self.outside_window(li) {
+            self.stats.allowed += 1;
+            return Outcome {
+                decision: Decision::SendNow,
+                flow: Some(*key),
+                limit: Some(limit_idx),
+            };
+        }
+
         // A cap is checked before the rate: a spent budget is not a speed
         // problem, and no amount of shaping makes it fit. Bytes are charged on
         // admission, so a packet that the retention buffer later sheds still
@@ -701,6 +715,17 @@ impl<const FLOWS: usize> Engine<FLOWS> {
     #[must_use]
     pub const fn calendar(&self) -> Calendar {
         self.calendar
+    }
+
+    /// Is this limit outside its time-of-day window right now?
+    ///
+    /// Limits without a window are never outside one, which is the common case
+    /// and therefore a single `None` check.
+    fn outside_window(&self, li: usize) -> bool {
+        let Some(window) = self.windows.get(li).copied().flatten() else {
+            return false;
+        };
+        !self.calendar.in_window(window)
     }
 
     /// Charge `len` bytes against a limit's cap.
@@ -1249,12 +1274,12 @@ mod tests {
     // data caps
     // -----------------------------------------------------------------------
 
-    /// Engine with one fast limit (so the rate never interferes) that carries a
-    /// byte budget, attached to outbound TCP 443.
+    /// Engine with one fast limit attached to outbound TCP 443, described by
+    /// the rest of a `limit` line (`cap 2gb/day`, `schedule 08:00-18:00`, ...).
     ///
     /// The limit is parsed from the user-facing syntax rather than built by
-    /// hand, so the spelling of `cap` is covered by these tests as well.
-    fn cap_engine(spec: &str) -> Engine<1024> {
+    /// hand, so the spelling of each option is covered by these tests as well.
+    fn spec_engine(spec: &str) -> Engine<1024> {
         let text = format!("limit budget = 64mbit {spec}\n");
         let (cfg, _) = Config::parse(&text).unwrap();
         let mut e = Engine::new(cfg);
@@ -1272,7 +1297,7 @@ mod tests {
     #[test]
     fn cap_drops_once_the_budget_is_spent() {
         // 3000 bytes of budget, 1500-byte frames: two fit, the third does not.
-        let mut e = cap_engine("cap 3000/day");
+        let mut e = spec_engine("cap 3000/day");
         let f = conn(51515);
         assert_eq!(decision_of(&mut e, &f, 0), Decision::SendNow);
         assert_eq!(decision_of(&mut e, &f, 1), Decision::SendNow);
@@ -1288,7 +1313,7 @@ mod tests {
 
     #[test]
     fn a_daily_cap_rolls_over_at_the_next_day() {
-        let mut e = cap_engine("cap 3000/day");
+        let mut e = spec_engine("cap 3000/day");
         let f = conn(51515);
         for token in 0..2 {
             assert_eq!(decision_of(&mut e, &f, token), Decision::SendNow);
@@ -1303,7 +1328,7 @@ mod tests {
 
     #[test]
     fn a_monthly_cap_survives_the_next_day() {
-        let mut e = cap_engine("cap 3000/month");
+        let mut e = spec_engine("cap 3000/month");
         let f = conn(51515);
         for token in 0..2 {
             assert_eq!(decision_of(&mut e, &f, token), Decision::SendNow);
@@ -1321,7 +1346,7 @@ mod tests {
     #[test]
     fn restored_usage_only_applies_to_the_period_it_was_recorded_in() {
         let f = conn(51515);
-        let mut e = cap_engine("cap 10000/day");
+        let mut e = spec_engine("cap 10000/day");
         e.set_calendar(Calendar::from_day_index(20_766));
 
         // A counter from yesterday must not be charged to today.
@@ -1350,5 +1375,76 @@ mod tests {
         }
         assert_eq!(e.snapshot().dropped_cap, 0);
         assert!(e.cap_usage().is_empty());
+    }
+
+    // -----------------------------------------------------------------------
+    // time-of-day schedules
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn a_scheduled_limit_only_applies_inside_its_window() {
+        let mut e = spec_engine("burst 1500 schedule 08:00-18:00");
+        let f = conn(51515);
+
+        // 09:00 UTC: inside the window, so the rate is enforced and most of six
+        // back-to-back frames cannot go out at the same instant.
+        e.set_calendar(Calendar::from_day_index(20_766).at_minute(9 * 60));
+        let held = (0..6)
+            .filter(|token| decision_of(&mut e, &f, *token) != Decision::SendNow)
+            .count();
+        assert!(held > 0, "the limit must bite at 09:00");
+
+        // 20:00 UTC: outside. The limit does not exist, so nothing is held.
+        e.set_calendar(Calendar::from_day_index(20_766).at_minute(20 * 60));
+        for token in 6..12 {
+            let decision = decision_of(&mut e, &f, token);
+            assert_eq!(decision, Decision::SendNow, "token {token} at 20:00");
+        }
+    }
+
+    #[test]
+    fn a_window_that_wraps_midnight_works_the_same_way() {
+        let f = conn(51515);
+        // 23:00 and 03:00 are inside `22:00-06:00`, and a 1500-byte budget is
+        // spent by the first frame there -- a fresh engine per instant, because
+        // a shaped flow carries its rate history to the next check.
+        for minute in [23 * 60, 3 * 60] {
+            let mut e = spec_engine("cap 1500/day schedule 22:00-06:00");
+            e.set_calendar(Calendar::from_day_index(20_766).at_minute(minute));
+            assert_eq!(decision_of(&mut e, &f, 0), Decision::SendNow);
+            assert_eq!(
+                decision_of(&mut e, &f, 1),
+                Decision::Drop(DropReason::Cap),
+                "minute {minute} must be inside the window"
+            );
+        }
+
+        // 12:00 is outside it: nothing is charged, so nothing drops.
+        let mut e = spec_engine("cap 1500/day schedule 22:00-06:00");
+        e.set_calendar(Calendar::from_day_index(20_766).at_minute(12 * 60));
+        for token in 0..4 {
+            assert_eq!(decision_of(&mut e, &f, token), Decision::SendNow);
+        }
+        assert_eq!(e.cap_usage()[0].used, 0);
+    }
+
+    #[test]
+    fn a_cap_is_not_charged_outside_the_schedule() {
+        let mut e = spec_engine("cap 3000/day schedule 08:00-18:00");
+        let f = conn(51515);
+
+        // 20:00 UTC: four 1500-byte frames would blow a 3000-byte budget, but
+        // the limit is not in force, so nothing is charged and nothing drops.
+        e.set_calendar(Calendar::from_day_index(20_766).at_minute(20 * 60));
+        for token in 0..4 {
+            assert_eq!(decision_of(&mut e, &f, token), Decision::SendNow);
+        }
+        assert_eq!(e.cap_usage()[0].used, 0, "nothing may be charged at 20:00");
+
+        // 09:00 UTC, same day: the budget is enforced from zero.
+        e.set_calendar(Calendar::from_day_index(20_766).at_minute(9 * 60));
+        assert_eq!(decision_of(&mut e, &f, 4), Decision::SendNow);
+        assert_eq!(decision_of(&mut e, &f, 5), Decision::SendNow);
+        assert_eq!(decision_of(&mut e, &f, 6), Decision::Drop(DropReason::Cap));
     }
 }

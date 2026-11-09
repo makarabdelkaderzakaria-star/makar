@@ -4,6 +4,17 @@
 
 ### Added
 
+* **Time-of-day schedules.** `limit steam.exe = 4mbit schedule 08:00-18:00`
+  (or `schedule 22:00-06:00`, which wraps midnight) enforces the limit only
+  inside that **UTC** window; outside it the limit does not exist -- packets go
+  out immediately and no cap is charged, so a cap on a scheduled limit is a
+  budget for the hours it runs. Windows are start-inclusive and end-exclusive,
+  bare hours (`8-18`) are accepted, and a zero-length or impossible window is
+  rejected at parse time. `lint` prints the window, and `simulate --at=09:30`
+  pins the clock so schedule tests are deterministic. Weekdays are not
+  supported yet. Tests: inside/outside, a window wrapping midnight, a cap not
+  charged outside, membership on both sides of midnight, and the parse
+  rejections.
 * **Data caps: a byte budget per day or month.** `limit phone.exe = 4mbit cap
   20gb/month` (or `cap 2gb/day`) drops matching traffic once the budget is
   spent, which is what a metered connection needs far more than a rate limit.

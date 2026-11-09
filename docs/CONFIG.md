@@ -34,7 +34,7 @@ Durations accept `ms`, `s`, or a bare number of milliseconds. Sizes accept
 packets is a shaper that causes retransmissions, and a retransmission spends the
 bandwidth twice. `250ms` is below the smallest plausible TCP RTO.
 
-## `limit <name> = <rate> [burst <bytes>] [policy <p>] [per-flow] [cap <bytes>/<period>]`
+## `limit <name> = <rate> [burst <bytes>] [policy <p>] [per-flow] [cap <bytes>/<period>] [schedule <window>]`
 
 ```text
 limit chrome.exe  = 8mbit   burst 64kb
@@ -42,6 +42,7 @@ limit steam.exe   = 20mbit  burst 256kb
 limit backup.exe  = 2mbit   burst 32kb policy drop
 limit browser.exe = 8mbit   burst 64kb per-flow
 limit phone.exe   = 4mbit   burst 64kb cap 20gb/month
+limit updater.exe = 20mbit  burst 256kb schedule 22:00-06:00
 ```
 
 * Rates: `8mbit`, `20mbps`, `512kbit`, `1.5mbit`, or a bare byte/s number.
@@ -61,6 +62,31 @@ limit phone.exe   = 4mbit   burst 64kb cap 20gb/month
   The cost is one `u64` in the flow table row that already exists — no second
   table, no allocation. `scope process` is the default and is what every
   previous version did.
+
+### Time-of-day schedules: `schedule <window>`
+
+A limit that only exists during part of the day — the shape of almost every
+"do not saturate the line while I am working" rule.
+
+```text
+limit backup.exe = 20mbit burst 256kb schedule 22:00-06:00
+limit steam.exe  = 4mbit  burst 64kb  schedule 08:00-18:00
+```
+
+* The window is `HH:MM-HH:MM`, minutes may be omitted (`8-18`), and the times
+  are **UTC** for the same reason caps are.
+* `08:00-18:00` is inside one day; `22:00-06:00` wraps midnight. The start is
+  inclusive and the end exclusive, so a window that wraps covers `22:00` up to
+  and including `05:59`.
+* Outside its window the limit does not exist: packets are forwarded
+  immediately, nothing is shaped, and **no cap is charged** (a cap on a
+  scheduled limit is a budget for the hours it runs, not for the whole day).
+* `simulate --at=09:30` pins the clock, so a schedule can be exercised
+  deterministically instead of depending on when the test runs. Without
+  `--at`, the simulator uses the real clock, like the daemon.
+* A zero-length window (`09:00-09:00`) is rejected: it is either a typo or a
+  request to disable the limit, and the config file should say which.
+* Weekdays are not supported yet; a schedule is the same every day.
 
 ### Data caps: `cap <bytes>/<period>`
 
@@ -152,11 +178,13 @@ limit steam.exe  = 20mbit burst 256kb
 limit backup.exe = 2mbit  burst 32kb policy drop
 limit browser.exe = 8mbit burst 64kb per-flow
 limit phone.exe   = 4mbit burst 64kb cap 20gb/month
+limit updater.exe = 20mbit burst 256kb schedule 02:00-05:00
 
 rule allow          : proc svchost.exe
 rule limit=chrome.exe : proc chrome.exe
 rule limit=steam.exe  : proc steam.exe
 rule limit=backup.exe : proc backup.exe
+rule limit=updater.exe : proc updater.exe
 rule block          : udp dport 27015-27050
 ```
 

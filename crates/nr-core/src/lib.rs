@@ -54,7 +54,7 @@ pub mod stats;
 
 pub use attribution::{FlowAttribution, FlowEvent, SeedReport, SnapshotEntry};
 pub use calendar::Calendar;
-pub use config::{Cap, CapPeriod, Config, LimitScope, Limits, OverLimitPolicy};
+pub use config::{Cap, CapPeriod, Config, LimitScope, Limits, OverLimitPolicy, Window};
 pub use error::{ConfigError, ParseError, RuleError};
 pub use flow::{Endpoint, FlowKey, FlowTable};
 pub use gcra::Gcra;

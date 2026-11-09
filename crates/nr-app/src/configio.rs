@@ -97,7 +97,7 @@ param batch-max = 64
 
 # --- limits ---------------------------------------------------------------
 # limit <name> = <rate> [burst <bytes>] [policy shape|drop|drop-inbound] [per-flow]
-#                 [cap <bytes>/day|<bytes>/month]
+#                 [cap <bytes>/day|<bytes>/month] [schedule HH:MM-HH:MM]
 #
 # policy shape         delay packets until they fit (no retransmissions)
 # policy drop          drop over-limit packets (TCP retransmits: wasteful)
@@ -107,6 +107,11 @@ param batch-max = 64
 #                      A browser with one tab on a 4K stream no longer starves
 #                      its own DNS lookups. `scope process` is the default.
 #
+# schedule <window>    only enforce the limit inside this UTC window, e.g.
+#                      `schedule 08:00-18:00`, or `schedule 22:00-06:00` for
+#                      overnight. Outside it the limit does not exist: nothing
+#                      is shaped and no cap is charged.
+#
 # cap <bytes>/<period> a byte budget for the limit, reset at 00:00 UTC every
 #                      day or on the first of the month. Bytes count in both
 #                      directions. When it is spent, matching packets are
@@ -114,7 +119,7 @@ param batch-max = 64
 #                      kept in <config>.caps so a restart does not refund it.
 #
 limit chrome.exe  = 8mbit   burst 64kb
-limit steam.exe   = 20mbit  burst 256kb
+limit steam.exe   = 20mbit  burst 256kb schedule 08:00-18:00
 limit backup.exe  = 2mbit   burst 32kb policy drop cap 20gb/month
 limit browser.exe = 8mbit   burst 64kb per-flow
 
@@ -183,6 +188,9 @@ pub fn lint(loaded: &Loaded) -> String {
                 nr_core::stats::human_bytes(cap.bytes),
                 cap.period.as_str()
             ));
+        }
+        if let Some(window) = l.window {
+            line.push_str(&format!("  schedule {window}"));
         }
         line.push('\n');
         s.push_str(&line);
@@ -337,6 +345,10 @@ mod tests {
         assert!(
             out.contains("cap 20.00 GB/month"),
             "lint must show the cap and its period:\n{out}"
+        );
+        assert!(
+            out.contains("schedule 08:00-18:00"),
+            "lint must show the schedule:\n{out}"
         );
         let _ = fs::remove_dir_all(&dir);
     }

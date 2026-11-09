@@ -86,7 +86,11 @@ Still open:
       with unit tests for independence, for the unchanged default, for
       single-flow enforcement, and for emission charging only the flow that
       emitted.
-* [ ] Time-of-day schedules and temporary boosts ("full speed until I am done").
+* [x] Time-of-day schedules: `limit <name> = <rate> schedule 08:00-18:00`
+      (UTC, may wrap midnight; outside the window the limit does not exist and
+      charges no cap). `simulate --at=HH:MM` pins the clock for tests.
+* [ ] Temporary boosts ("full speed until I am done"): a deadline the daemon
+      and the config file can both express, plus a way to cancel it.
 * [x] Data caps: a byte budget per day/month, which is what metered connections
       need far more than a rate limit. `limit <name> = <rate> cap 20gb/month`
       (or `/day`), UTC rollover, counters persisted in `<config>.caps`, drop
