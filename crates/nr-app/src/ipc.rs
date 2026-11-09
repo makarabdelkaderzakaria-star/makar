@@ -446,6 +446,12 @@ mod win_pipe {
         ) -> Bool;
         fn CloseHandle(object: Handle) -> Bool;
         fn GetCurrentProcess() -> Handle;
+    }
+
+    // The security and token calls live in advapi32, not kernel32; declaring
+    // them in one block compiles and then fails at link time with LNK1120.
+    #[link(name = "advapi32")]
+    extern "system" {
         fn OpenProcessToken(process: Handle, access: Dword, token: *mut Handle) -> Bool;
         fn GetTokenInformation(
             token: Handle,
