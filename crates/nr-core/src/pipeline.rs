@@ -955,8 +955,8 @@ mod tests {
     // -----------------------------------------------------------------------
 
     /// Engine with one 8 Mbit/s limit (1 MB/s, ~1.5 ms per 1500-byte frame,
-    /// 6 KB burst => four frames fit in the burst window) and a rule that
-    /// attaches it to outbound TCP 443.
+    /// 6 KB burst => [`BURST_FRAMES`] frames conform at one instant) and a rule
+    /// that attaches it to outbound TCP 443.
     fn scope_engine(scope: LimitScope) -> Engine<1024> {
         let mut cfg = Config::default();
         cfg.upsert(
@@ -977,6 +977,14 @@ mod tests {
         tcp_v4([10, 0, 0, 1], src_port, [1, 1, 1, 1], 443, &[0; 1460])
     }
 
+    /// Frames that conform at a single instant before the burst is spent.
+    ///
+    /// 6 KB of burst at 1 MB/s is 6 ms of tolerance; each 1500-byte frame costs
+    /// 1.5 ms, so the fifth frame still conforms at `now = 0` (GCRA tests
+    /// `now >= tat - tolerance`, and the first packet starts from `tat = 0`).
+    /// The sixth is the first one over the limit.
+    const BURST_FRAMES: usize = 5;
+
     /// Drain one flow's burst at `now`, then check a *second* flow at the same
     /// instant. With `per-flow` the second flow must be untouched; with
     /// `process` scope it must inherit the first flow's debt.
@@ -987,7 +995,7 @@ mod tests {
 
         // per-flow: B is not starved by A.
         let mut e = scope_engine(LimitScope::Flow);
-        for i in 0..4 {
+        for i in 0..BURST_FRAMES as u64 {
             let out = e.process(&a, Direction::Outbound, 0, u32::MAX, i, 0, 0);
             assert_eq!(
                 out.decision,
@@ -1009,7 +1017,7 @@ mod tests {
         // process scope: the same two flows share one bucket, which is the
         // documented default and must not have changed.
         let mut e = scope_engine(LimitScope::Process);
-        for i in 0..4 {
+        for i in 0..BURST_FRAMES as u64 {
             e.process(&a, Direction::Outbound, 0, u32::MAX, i, 0, 0);
         }
         let shared = e.process(&b, Direction::Outbound, 0, u32::MAX, 11, 0, 0);
@@ -1054,7 +1062,7 @@ mod tests {
         // Both flows exist and are conforming at t = 0.
         let b_first = e.process(&b, Direction::Outbound, 0, u32::MAX, 0, 0, 0);
         assert!(b_first.is_send_now());
-        for i in 0..4 {
+        for i in 0..BURST_FRAMES as u64 {
             e.process(&a, Direction::Outbound, 0, u32::MAX, i, 0, 0);
         }
         let verdict = e.process(&a, Direction::Outbound, 0, u32::MAX, 20, 0, 0);
