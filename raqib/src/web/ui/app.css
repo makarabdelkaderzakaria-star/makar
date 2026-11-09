@@ -2,6 +2,8 @@
    industrial, editorial, deliberately un-generic. No purple gradients,
    no Inter, no rounded cards on a white page. */
 
+/*__FONTS__*/
+
 :root {
   --ink:        #0a0c0b;
   --ink-2:      #0f1312;
